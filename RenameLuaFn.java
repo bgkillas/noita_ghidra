@@ -28,6 +28,7 @@ public class RenameLuaFn extends GhidraScript {
     AddressFactory addressFactory;
     AddressSpace space;
     ProgramBasedDataTypeManager dtm;
+    SourceType source = SourceType.USER_DEFINED;
     protected void run() throws Exception {
         gstate = this.getState();
         program = gstate.getCurrentProgram();
@@ -50,14 +51,14 @@ public class RenameLuaFn extends GhidraScript {
     	for (int i = 0; i < addrs.length; i++) {
     		Address addr = space.getAddress(addrs[i]);
     		Symbol sym = fpapi.getSymbolAt(addr);
-    		sym.setName(names[i], SourceType.USER_DEFINED);
+    		sym.setName(names[i], source);
     	}
     	String[] fn_names = {"get_entity", "kill_entity", "create_entity"};
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
     		Function fn = fpapi.getFunctionAt(addr);
-    		fn.setName(fn_names[i], SourceType.USER_DEFINED);
+    		fn.setName(fn_names[i], source);
     	}
     }
 
@@ -79,14 +80,14 @@ public class RenameLuaFn extends GhidraScript {
         DataType type = new PointerDataType(this.create_type("lua_state", 4), dtm);
         Address addr = space.getAddress(0x007ea410);
         Function fn = fpapi.getFunctionAt(addr);
-        fn.setName("register_lua_functions", SourceType.USER_DEFINED);
+        fn.setName("register_lua_functions", source);
         FunctionSignature sig = fn.getSignature();
         ParameterDefinition[] args = sig.getArguments();
         args[0].setName("lua_state");
         args[0].setDataType(type);
         FunctionDefinitionDataType fddt = new FunctionDefinitionDataType(sig);
         fddt.setArguments(args);
-        ApplyFunctionSignatureCmd cmd = new ApplyFunctionSignatureCmd(fn.getEntryPoint(), fddt, SourceType.USER_DEFINED);
+        ApplyFunctionSignatureCmd cmd = new ApplyFunctionSignatureCmd(fn.getEntryPoint(), fddt, source);
         this.runCommand(cmd);
         String decompiled = fdapi.decompile(fn);
 
@@ -110,7 +111,7 @@ public class RenameLuaFn extends GhidraScript {
                 lua_args[0].setDataType(type);
                 FunctionDefinitionDataType lua_fddt = new FunctionDefinitionDataType(lua_sig);
                 lua_fddt.setArguments(lua_args);
-                ApplyFunctionSignatureCmd lua_cmd = new ApplyFunctionSignatureCmd(lua_fn.getEntryPoint(), lua_fddt, SourceType.USER_DEFINED);
+                ApplyFunctionSignatureCmd lua_cmd = new ApplyFunctionSignatureCmd(lua_fn.getEntryPoint(), lua_fddt, source);
                 this.runCommand(lua_cmd);
             }
 
@@ -118,7 +119,7 @@ public class RenameLuaFn extends GhidraScript {
             decompiled = decompiled.substring(start_name + 1);
             int end_name = decompiled.indexOf('"');
             String name = decompiled.substring(0, end_name);
-            lua_fn.setName("lua_" + pascal_to_snake(name), SourceType.USER_DEFINED);
+            lua_fn.setName("lua_" + pascal_to_snake(name), source);
         }
     }
 }
