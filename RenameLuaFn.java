@@ -18,17 +18,58 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.program.model.symbol.Symbol;
 
 public class RenameLuaFn extends GhidraScript {
+    GhidraState gstate;
+    Program program;
+    FlatProgramAPI fpapi;
+    FlatDecompilerAPI fdapi;
+    AddressFactory addressFactory;
+    AddressSpace space;
+    ProgramBasedDataTypeManager dtm;
     protected void run() throws Exception {
-        GhidraState gstate = this.getState();
-        Program program = gstate.getCurrentProgram();
-        FlatProgramAPI fpapi = new FlatProgramAPI(program);
-        FlatDecompilerAPI fdapi = new FlatDecompilerAPI(fpapi);
-        AddressFactory addressFactory = program.getAddressFactory();
-        AddressSpace space = addressFactory.getDefaultAddressSpace();
-        ProgramBasedDataTypeManager dtm = program.getDataTypeManager();
-        DataType type = new PointerDataType(this.create_type(dtm, "lua_state", 4), dtm);
+        gstate = this.getState();
+        program = gstate.getCurrentProgram();
+        fpapi = new FlatProgramAPI(program);
+        fdapi = new FlatDecompilerAPI(fpapi);
+        addressFactory = program.getAddressFactory();
+        space = addressFactory.getDefaultAddressSpace();
+        dtm = program.getDataTypeManager();
+    	rename_lua_fn();
+    	String[] names = {"entity_manager_ptr", "world_seed", "new_game_count",
+    			"global_stats", "game_global_ptr", "entity_tag_manager_ptr",
+    			"component_type_manager", "component_tag_manager_ptr", "translation_manager",
+    			"platform", "internal_filenames", "inventory_system",
+    			"lua_mods", "max_component_id", "component_system_manager"};
+    	long[] addrs = {0x01204b98, 0x1205004, 0x1205024, 
+    			0x1208940, 0x122374c, 0x1206fac, 
+    			0x1223c88, 0x1204b30, 0x1207c28,
+    			0x1221bc0, 0x1207bd4, 0x12224f0,
+    			0x1207e90, 0x1152ff0, 0x12236e8};
+    	for (int i = 0; i < addrs.length; i++) {
+    		Address addr = space.getAddress(addrs[i]);
+    		Symbol sym = fpapi.getSymbolAt(addr);
+    		sym.setName(names[i], SourceType.USER_DEFINED);
+    	}
+    }
+
+    DataType create_type(String name, int size) {
+        DataType existing = dtm.getDataType("custom/" + name);
+        if (existing != null) {
+            return existing;
+        }
+        CategoryPath category = new CategoryPath("/custom");
+        StructureDataType struct = new StructureDataType(category, name, size);
+        return dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
+    }
+
+    static String pascal_to_snake(String input) {
+        return input.replaceAll("([a-z0-9])([A-Z])", "$1_$2").replaceAll("([A-Z])([A-Z][a-z])", "$1_$2").toLowerCase();
+    }
+    
+    void rename_lua_fn() throws Exception {
+        DataType type = new PointerDataType(this.create_type("lua_state", 4), dtm);
         Address addr = space.getAddress(0x007ea410);
         Function fn = fpapi.getFunctionAt(addr);
         fn.setName("register_lua_functions", SourceType.USER_DEFINED);
@@ -72,19 +113,5 @@ public class RenameLuaFn extends GhidraScript {
             String name = decompiled.substring(0, end_name);
             lua_fn.setName("lua_" + pascal_to_snake(name), SourceType.USER_DEFINED);
         }
-    }
-
-    DataType create_type(ProgramBasedDataTypeManager dtm, String name, int size) {
-        DataType existing = dtm.getDataType("custom/" + name);
-        if (existing != null) {
-            return existing;
-        }
-        CategoryPath category = new CategoryPath("/custom");
-        StructureDataType struct = new StructureDataType(category, name, size);
-        return dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
-    }
-
-    public static String pascal_to_snake(String input) {
-        return input.replaceAll("([a-z0-9])([A-Z])", "$1_$2").replaceAll("([A-Z])([A-Z][a-z])", "$1_$2").toLowerCase();
     }
 }
