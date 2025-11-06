@@ -50,9 +50,9 @@ public class RenameLuaFn extends GhidraScript {
             }
 
             decompiled = decompiled.substring(start + target.length());
-            int comma = decompiled.indexOf(44);
+            int comma = decompiled.indexOf(',');
             decompiled = decompiled.substring(comma + 1);
-            comma = decompiled.indexOf(44);
+            comma = decompiled.indexOf(',');
             String fn_addr = decompiled.substring(0, comma);
             Function lua_fn = fpapi.getGlobalFunctions(fn_addr).get(0);
             FunctionSignature lua_sig = lua_fn.getSignature();
@@ -66,9 +66,9 @@ public class RenameLuaFn extends GhidraScript {
                 this.runCommand(lua_cmd);
             }
 
-            int start_name = decompiled.indexOf(34);
+            int start_name = decompiled.indexOf('"');
             decompiled = decompiled.substring(start_name + 1);
-            int end_name = decompiled.indexOf(34);
+            int end_name = decompiled.indexOf('"');
             String name = decompiled.substring(0, end_name);
             lua_fn.setName("lua_" + pascal_to_snake(name), SourceType.USER_DEFINED);
         }
