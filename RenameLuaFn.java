@@ -75,11 +75,11 @@ public class RenameLuaFn extends GhidraScript {
     }
 
     DataType create_type(ProgramBasedDataTypeManager dtm, String name, int size) {
-        DataType existing = dtm.getDataType("noita.exe/custom/" + name);
+        DataType existing = dtm.getDataType("custom/" + name);
         if (existing != null) {
             return existing;
         }
-        CategoryPath category = new CategoryPath("/noita.exe/custom");
+        CategoryPath category = new CategoryPath("/custom");
         StructureDataType struct = new StructureDataType(category, name, size);
         return dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
     }
