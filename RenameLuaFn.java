@@ -54,7 +54,7 @@ public class RenameLuaFn extends GhidraScript {
             decompiled = decompiled.substring(comma + 1);
             comma = decompiled.indexOf(44);
             String fn_addr = decompiled.substring(0, comma);
-            Function lua_fn = (Function)fpapi.getGlobalFunctions(fn_addr).get(0);
+            Function lua_fn = fpapi.getGlobalFunctions(fn_addr).get(0);
             FunctionSignature lua_sig = lua_fn.getSignature();
             ParameterDefinition[] lua_args = lua_sig.getArguments();
             if (lua_args.length != 0) {
