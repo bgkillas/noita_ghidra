@@ -8,8 +8,14 @@ use syn::{
 };
 fn main() {
     let strings = parse_from_file(&args().nth(1).unwrap());
+    let mut first = true;
     for s in strings {
-        println!("{s}");
+        if first {
+            first = false;
+            println!("{s}");
+        } else {
+            println!("\n{s}");
+        }
     }
 }
 fn parse_generics(generics: &Generics) -> String {
@@ -143,51 +149,51 @@ fn parse_from_file(path: &str) -> Vec<String> {
 }
 fn parse_struct(item_struct: ItemStruct) -> String {
     let mut s = format!(
-        "Struct: {}{}",
+        "struct {}{} {{",
         item_struct.ident,
         parse_generics(&item_struct.generics)
     );
     for field in &item_struct.fields {
         if let Some(ident) = &field.ident {
-            s += &format!("\n {ident}: {}", parse_type(&field.ty))
+            s += &format!("\n {} {ident};", parse_type(&field.ty))
         } else {
-            s += &format!("\n {}", parse_type(&field.ty))
+            s += &format!("\n {};", parse_type(&field.ty))
         }
     }
-    s
+    format!("{s}\n}};")
 }
 fn parse_enum(item_enum: ItemEnum) -> String {
     let mut s = format!(
-        "Enum: {}{}",
+        "enum {}{} {{",
         item_enum.ident,
         parse_generics(&item_enum.generics)
     );
     for var in &item_enum.variants {
         if let Some(d) = &var.discriminant {
             s += &format!(
-                "\n {}{} = {}",
+                "\n {}{} = {},",
                 var.ident,
                 parse_field(&var.fields),
                 parse_len(&d.1)
             )
         } else {
-            s += &format!("\n {}{}", var.ident, parse_field(&var.fields))
+            s += &format!("\n {}{},", var.ident, parse_field(&var.fields))
         }
     }
-    s
+    format!("{s}\n}};")
 }
 fn parse_union(item_union: ItemUnion) -> String {
     let mut s = format!(
-        "Union: {}{}",
+        "union {}{} {{",
         item_union.ident,
         parse_generics(&item_union.generics)
     );
     for field in item_union.fields.named {
         if let Some(ident) = &field.ident {
-            s += &format!("\n {ident}: {}", parse_type(&field.ty))
+            s += &format!("\n {} {ident};", parse_type(&field.ty))
         }
     }
-    s
+    format!("{s}\n}};")
 }
 fn parse_field(fields: &Fields) -> String {
     match fields {
