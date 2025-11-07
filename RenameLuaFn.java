@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -7,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
@@ -65,10 +67,33 @@ public class RenameLuaFn extends GhidraScript {
     		type_map.put("u"+i, "uint"+i+"_t");
        		type_map.put("i"+i, "int"+i+"_t");
     	}
+    	parse_component_doc();
         parse_rust();
     	rename_lua_fn();
     	rename_globals();
     	rename_functions();
+    }
+    
+    void parse_component_doc() throws Exception {
+    	String file = "";
+    	String[] components = file.split("\r\n\r\n");
+    	for (int i = 0; i < components.length - 1;i++) {
+    		parse_component(components[i]);
+    	}
+    }
+    
+    DataType parse_component(String component) {
+    	List<String> lines = component.lines().toList();
+    	String name = lines.get(0);
+    	for (int i = 1; i < lines.size();i++) {
+    		String line = lines.get(i);
+    		String[] desc_split = line.split("\"");
+    		if (desc_split.length == 3) {
+    			String desc = desc_split[1];
+    			line = desc_split[0];
+    		}
+    	}
+    	return null;
     }
     
     void parse_rust() throws Exception {
