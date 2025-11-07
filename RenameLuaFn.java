@@ -1,3 +1,5 @@
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -12,7 +14,6 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.ArrayDataType;
-import ghidra.program.model.data.BuiltInDataTypeManager;
 import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeConflictHandler;
@@ -29,6 +30,7 @@ import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
+import generic.jar.ResourceFile;
 
 public class RenameLuaFn extends GhidraScript {
     GhidraState gstate;
@@ -58,7 +60,6 @@ public class RenameLuaFn extends GhidraScript {
     		map.put("u"+i, "uint"+i+"_t");
        		map.put("i"+i, "int"+i+"_t");
     	}
-    	System.out.println(map);
         parse_rust();
     	rename_lua_fn();
     	rename_globals();
@@ -66,11 +67,13 @@ public class RenameLuaFn extends GhidraScript {
     }
     
     void parse_rust() throws Exception {
-    	String out = "struct T a:*[**u64;3] b:isize c:bool d:char e:u64"
-    			+ "\nenum K A:-1 B:0"
-    			+ "\nunion Y a:*isize b:usize";
-    	Stream<String> lines = out.lines();
-    	for (String line : lines.toList()) {
+    	String folder = sourceFile.getParentFile().getAbsolutePath();
+    	Runtime rt = Runtime.getRuntime();
+    	String[] commands = {folder + "/target/release/parse", folder + "/noita_entangled_worlds/noita_api/src/noita/types.rs"};
+    	Process proc = rt.exec(commands);
+    	BufferedReader std_input = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+    	String line = null;
+    	while ((line = std_input.readLine()) != null) {
     		String[] split = line.split(" ");
     		String name = split[1];
     		if (name.endsWith(">")) {
@@ -112,7 +115,6 @@ public class RenameLuaFn extends GhidraScript {
     DataType parse_type(String name) {
 		if (name.startsWith("*")) {
 			name = name.substring(1);
-			System.out.println(name);
 			return new PointerDataType(parse_type(name));
 		}
 		if (name.startsWith("[") && name.endsWith("]")) {
@@ -120,13 +122,10 @@ public class RenameLuaFn extends GhidraScript {
 			int split = name.lastIndexOf(";");
 			int len = Integer.parseInt(name.substring(split+1));
 			name = name.substring(0, split);
-			System.out.println(name);
 			return new ArrayDataType(parse_type(name), len);			
 		}
 		if (map.containsKey(name)) {
-			System.out.println(name);
 			name = map.get(name);
-			System.out.println(name);
 		}
 		return get_type(name);
     }
@@ -142,16 +141,9 @@ public class RenameLuaFn extends GhidraScript {
     }
     
     private DataType find_type_in_manager(DataTypeManager datatypemanager, String name) {
-    	System.out.println();
         Iterator<DataType> types = datatypemanager.getAllDataTypes();
         while (types.hasNext()) {
             DataType type = types.next();
-            if (type.getName().startsWith("uint")) {
-            	System.out.println(name);
-            	System.out.println(type.getName());
-            	System.out.println(name.length());
-            	System.out.println(type.getName().length());
-            }
             if (type.getName().equals(name)) {
                 return type;
             }
