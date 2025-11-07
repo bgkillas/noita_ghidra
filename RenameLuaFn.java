@@ -5,6 +5,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.app.script.GhidraScript;
@@ -105,7 +108,12 @@ public class RenameLuaFn extends GhidraScript {
 				for (int i = 0; i < generics.length; i ++) {
 					String generic = generics[i];
 					String value = values[i];
-					rest = rest.replace(generic, value);
+					Pattern pattern = Pattern.compile("[^A-Za-z0-9]"+generic+"([^A-Za-z0-9]|$)");
+					Matcher matcher = pattern.matcher(rest);
+					while (matcher.find()) {
+						int pos = matcher.start() + 1;
+						rest = rest.substring(0, pos) + value + rest.substring(pos + generic.length());
+					}
 				}
 				String string = split[0] + " " + name_no_gen + "<" + join + ">" + " " + rest;
 				return register_data_type(string, true);
