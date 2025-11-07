@@ -45,8 +45,9 @@ public class RenameLuaFn extends GhidraScript {
     ProgramBasedDataTypeManager dtm;
     SourceType source = SourceType.USER_DEFINED;
 	Map<String, String> type_map = new HashMap<>();
-	Map<String, java.util.function.Function<String[], DataType>> generic_map = new HashMap<>();
+	Map<String, java.util.function.Function<List<String>, DataType>> generic_map = new HashMap<>();
     DataTypeManagerService svc;
+    
     protected void run() throws Exception {
         gstate = this.getState();
         program = gstate.getCurrentProgram();
@@ -90,14 +91,33 @@ public class RenameLuaFn extends GhidraScript {
     	}
     }
     
+    List<String> split_locally(String string, char delim, char lb, char rb) {
+    	List<String> ret = new ArrayList<>();
+    	int l = 0;
+    	int last = 0;
+    	for (int i = 0; i < string.length(); i++) {
+    		char c = string.charAt(i);
+    		if (c == lb) {
+    			l += 1;
+    		} else if (c == rb) {
+    			l -= 1;
+    		} else if (c == delim && l == 0) {
+    			ret.add(string.substring(last, i));
+    			last = i + 1;
+    		}
+    	}
+		ret.add(string.substring(last));
+    	return ret;
+    }
+    
     DataType register_data_type(final String line, boolean ignore) {
 		String[] split = line.split(" ");
 		String name = split[1];
 		if (name.endsWith(">") && !ignore) {
 			int index = name.indexOf("<");
-			final String[] generics = name.substring(index + 1, name.length() - 1).split(",");
 			final String name_no_gen = name.substring(0, index);
 			generic_map.put(name_no_gen, values -> {
+				List<String> generics = split_locally(name.substring(index + 1, name.length() - 1), ',', '<', '>');
 				String join = "";
 				for (String s: values) {
 					join += s;
@@ -105,9 +125,9 @@ public class RenameLuaFn extends GhidraScript {
 				}
 				join = join.substring(0, join.length()-1);
 				String rest = line.split(" ", 3)[2];
-				for (int i = 0; i < generics.length; i ++) {
-					String generic = generics[i];
-					String value = values[i];
+				for (int i = 0; i < generics.size(); i ++) {
+					String generic = generics.get(i);
+					String value = values.get(i);
 					Pattern pattern = Pattern.compile("[^A-Za-z0-9]"+generic+"([^A-Za-z0-9]|$)");
 					Matcher matcher = pattern.matcher(rest);
 					while (matcher.find()) {
@@ -160,7 +180,7 @@ public class RenameLuaFn extends GhidraScript {
 		}
 		if (name.endsWith(">")) {
 			int index = name.indexOf("<");
-			String[] generics = name.substring(index + 1, name.length() - 1).split(",");
+			List<String> generics = split_locally(name.substring(index + 1, name.length() - 1),',','<','>');
 			String name_no_gen = name.substring(0, index);
 			return generic_map.get(name_no_gen).apply(generics);
 		}
@@ -268,14 +288,12 @@ public class RenameLuaFn extends GhidraScript {
         ApplyFunctionSignatureCmd cmd = new ApplyFunctionSignatureCmd(fn.getEntryPoint(), fddt, source);
         this.runCommand(cmd);
         String decompiled = fdapi.decompile(fn);
-
         while(true) {
             String target = "lua_pushcclosure(";
             int start = decompiled.indexOf(target);
             if (start == -1) {
                 return;
             }
-
             decompiled = decompiled.substring(start + target.length());
             int comma = decompiled.indexOf(',');
             decompiled = decompiled.substring(comma + 1);
@@ -292,7 +310,6 @@ public class RenameLuaFn extends GhidraScript {
                 ApplyFunctionSignatureCmd lua_cmd = new ApplyFunctionSignatureCmd(lua_fn.getEntryPoint(), lua_fddt, source);
                 this.runCommand(lua_cmd);
             }
-
             int start_name = decompiled.indexOf('"');
             decompiled = decompiled.substring(start_name + 1);
             int end_name = decompiled.indexOf('"');
