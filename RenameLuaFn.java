@@ -1,9 +1,10 @@
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.app.script.GhidraScript;
@@ -30,7 +31,6 @@ import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
-import generic.jar.ResourceFile;
 
 public class RenameLuaFn extends GhidraScript {
     GhidraState gstate;
@@ -41,7 +41,8 @@ public class RenameLuaFn extends GhidraScript {
     AddressSpace space;
     ProgramBasedDataTypeManager dtm;
     SourceType source = SourceType.USER_DEFINED;
-	Map<String, String> map = new HashMap<>();
+	Map<String, String> type_map = new HashMap<>();
+	Map<String, java.util.function.Function<String[], DataType>> generic_map = new HashMap<>();
     DataTypeManagerService svc;
     protected void run() throws Exception {
         gstate = this.getState();
@@ -52,13 +53,13 @@ public class RenameLuaFn extends GhidraScript {
         space = addressFactory.getDefaultAddressSpace();
         dtm = program.getDataTypeManager();
         svc = state.getTool().getService(DataTypeManagerService.class);
-    	map.put("usize", "uint");
-    	map.put("isize", "int");
-    	map.put("f32", "float");
-    	map.put("f64", "double");
+    	type_map.put("usize", "uint");
+    	type_map.put("isize", "int");
+    	type_map.put("f32", "float");
+    	type_map.put("f64", "double");
     	for (int i = 8; i < 128; i *= 2) {
-    		map.put("u"+i, "uint"+i+"_t");
-       		map.put("i"+i, "int"+i+"_t");
+    		type_map.put("u"+i, "uint"+i+"_t");
+       		type_map.put("i"+i, "int"+i+"_t");
     	}
         parse_rust();
     	rename_lua_fn();
@@ -72,50 +73,88 @@ public class RenameLuaFn extends GhidraScript {
     	String[] commands = {folder + "/target/release/parse", folder + "/noita_entangled_worlds/noita_api/src/noita/types.rs"};
     	Process proc = rt.exec(commands);
     	BufferedReader std_input = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+    	List<String> lines = new ArrayList<>();
     	String line = null;
     	while ((line = std_input.readLine()) != null) {
-    		String[] split = line.split(" ");
-    		String name = split[1];
-    		if (name.endsWith(">")) {
-    			continue;
+    		if (line.split(" ", 3)[1].contains("<")) {
+    			lines.add(0,line);
+    		} else {
+    			lines.add(line);
     		}
-    		if (split[0].equals("struct")) {
-    			StructureDataType struct = create_struct(name);
-    			for (int i = 2; i < split.length; i++) {
-    				String[] pair = split[i].split(":");
-    				String component = pair[0];
-    				String value = pair[1];
-    				DataType type = parse_type(value);
-    				struct.add(type, type.getLength(), component, "");
-    			}
-    			dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
-    		} else if (split[0].equals("union")) {
-    			UnionDataType union = create_union(name);
-    			for (int i = 2; i < split.length; i++) {
-    				String[] pair = split[i].split(":");
-    				String component = pair[0];
-    				String value = pair[1];
-    				DataType type = parse_type(value);
-    				union.add(type, type.getLength(), component, "");
-    			}
-    			dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);    			
-    		} else if (split[0].equals("enum")) {
-    			EnumDataType enumt = create_enum(name);
-    			for (int i = 2; i < split.length; i++) {
-    				String[] pair = split[i].split(":");
-    				String component = pair[0];
-    				String value = pair[1];
-    				enumt.add(component, Long.parseLong(value), "");
-    			}
-    			dtm.addDataType(enumt, DataTypeConflictHandler.REPLACE_HANDLER);    			    			
-    		}
-    	}	
+    	}
+    	for (String value: lines) {
+    		register_data_type(value, false);
+    	}
+    }
+    
+    DataType register_data_type(final String line, boolean ignore) {
+		String[] split = line.split(" ");
+		String name = split[1];
+		if (name.endsWith(">") && !ignore) {
+			int index = name.indexOf("<");
+			final String[] generics = name.substring(index + 1, name.length() - 1).split(",");
+			final String name_no_gen = name.substring(0, index);
+			generic_map.put(name_no_gen, values -> {
+				String join = "";
+				for (String s: values) {
+					join += s;
+					join += ",";
+				}
+				join = join.substring(0, join.length()-1);
+				String rest = line.split(" ", 3)[2];
+				for (int i = 0; i < generics.length; i ++) {
+					String generic = generics[i];
+					String value = values[i];
+					rest = rest.replace(generic, value);
+				}
+				String string = split[0] + " " + name_no_gen + "<" + join + ">" + " " + rest;
+				return register_data_type(string, true);
+			});
+			return null;
+		}
+		if (split[0].equals("struct")) {
+			StructureDataType struct = create_struct(name);
+			for (int i = 2; i < split.length; i++) {
+				String[] pair = split[i].split(":");
+				String component = pair[0];
+				String value = pair[1];
+				DataType type = parse_type(value);
+				struct.add(type, type.getLength(), component, "");
+			}
+			return dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
+		} else if (split[0].equals("union")) {
+			UnionDataType union = create_union(name);
+			for (int i = 2; i < split.length; i++) {
+				String[] pair = split[i].split(":");
+				String component = pair[0];
+				String value = pair[1];
+				DataType type = parse_type(value);
+				union.add(type, type.getLength(), component, "");
+			}
+			return dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);    			
+		} else if (split[0].equals("enum")) {
+			EnumDataType enumt = create_enum(name);
+			for (int i = 2; i < split.length; i++) {
+				String[] pair = split[i].split(":");
+				String component = pair[0];
+				String value = pair[1];
+				enumt.add(component, Long.parseLong(value), "");
+			}
+			return dtm.addDataType(enumt, DataTypeConflictHandler.REPLACE_HANDLER);    			    			
+		}
+		return null;
     }
     
     DataType parse_type(String name) {
 		if (name.startsWith("*")) {
 			name = name.substring(1);
 			return new PointerDataType(parse_type(name));
+		}
+		if (name.endsWith(">")) {
+			int index = name.indexOf("<");
+			String[] generics = name.substring(index + 1, name.length() - 1).split(",");
+			String name_no_gen = name.substring(0, index);
+			return generic_map.get(name_no_gen).apply(generics);
 		}
 		if (name.startsWith("[") && name.endsWith("]")) {
 			name = name.substring(1, name.length() - 1);
@@ -124,8 +163,8 @@ public class RenameLuaFn extends GhidraScript {
 			name = name.substring(0, split);
 			return new ArrayDataType(parse_type(name), len);			
 		}
-		if (map.containsKey(name)) {
-			name = map.get(name);
+		if (type_map.containsKey(name)) {
+			name = type_map.get(name);
 		}
 		return get_type(name);
     }
