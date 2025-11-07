@@ -7,52 +7,48 @@ use syn::{
     TypeReference, TypeSlice, TypeTuple, UnOp,
 };
 fn main() {
-    let strings = parse_from_file(&args().nth(1).unwrap());
-    let mut first = true;
-    for s in strings {
-        if first {
-            first = false;
-            println!("{s}");
+    for arg in args().skip(1) {
+        if let Ok(iter) = fs::read_dir(&arg) {
+            for file in iter {
+                let strings = parse_from_file(file.unwrap().path().to_str().unwrap());
+                for s in strings {
+                    println!("{s}");
+                }
+            }
         } else {
-            println!("\n{s}");
+            let strings = parse_from_file(&arg);
+            for s in strings {
+                println!("{s}");
+            }
         }
     }
 }
 fn parse_generics(generics: &Generics) -> String {
-    if generics.params.is_empty() {
+    let generics = generics
+        .params
+        .iter()
+        .filter_map(|g| match g {
+            GenericParam::Lifetime(_) => None,
+            GenericParam::Type(ty) => Some(ty.ident.to_string()),
+            GenericParam::Const(id) => Some(id.ident.to_string()),
+        })
+        .collect::<Vec<String>>();
+    if generics.is_empty() {
         String::new()
     } else {
-        format!(
-            "<{}>",
-            generics
-                .params
-                .iter()
-                .map(|g| match g {
-                    GenericParam::Lifetime(_) => {
-                        String::new()
-                    }
-                    GenericParam::Type(ty) => {
-                        format!("{}", ty.ident)
-                    }
-                    GenericParam::Const(_) => {
-                        String::new()
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
+        format!("<{}>", generics.join(","))
     }
 }
 fn parse_type(ty: &Type) -> String {
     match ty {
         Type::Array(TypeArray { elem, len, .. }) => {
-            format!("[{}; {}]", parse_type(elem), parse_len(len))
+            format!("[{};{}]", parse_type(elem), parse_len(len))
         }
         Type::Ptr(TypePtr { elem, .. }) => {
-            format!("*const {}", parse_type(elem))
+            format!("*{}", parse_type(elem))
         }
         Type::Reference(TypeReference { elem, .. }) => {
-            format!("&{}", parse_type(elem))
+            format!("*{}", parse_type(elem))
         }
         Type::Slice(TypeSlice { elem, .. }) => {
             format!("[{}]", parse_type(elem))
@@ -70,7 +66,7 @@ fn parse_type(ty: &Type) -> String {
         Type::Path(TypePath { path, .. }) => {
             let last = path.segments.last().unwrap();
             if last.arguments.is_empty() {
-                format!("{}", last.ident)
+                last.ident.to_string()
             } else if let PathArguments::AngleBracketed(AngleBracketedGenericArguments {
                 args,
                 ..
@@ -84,18 +80,19 @@ fn parse_type(ty: &Type) -> String {
                             GenericArgument::Type(ty) => {
                                 parse_type(ty)
                             }
-                            _ => {
-                                String::new()
+                            GenericArgument::Const(expr) => {
+                                parse_len(expr)
                             }
+                            _ => todo!(),
                         })
                         .collect::<Vec<String>>()
-                        .join(", ")
+                        .join(",")
                 )
             } else {
                 String::new()
             }
         }
-        _ => "not parsed".to_string(),
+        _ => todo!(),
     }
 }
 fn parse_len(ex: &Expr) -> String {
@@ -104,7 +101,7 @@ fn parse_len(ex: &Expr) -> String {
             Lit::Int(int) => int
                 .base10_parse::<isize>()
                 .map_or_else(|_| ex.to_token_stream().to_string(), |v| v.to_string()),
-            _ => String::new(),
+            _ => todo!(),
         },
         Expr::Binary(bin) => {
             let Ok(l) = parse_len(&bin.left).parse::<isize>() else {
@@ -120,7 +117,7 @@ fn parse_len(ex: &Expr) -> String {
                 "+" => l + r,
                 "-" => l - r,
                 "%" => l % r,
-                _ => return String::new(),
+                _ => todo!(),
             }
             .to_string()
         }
@@ -128,9 +125,10 @@ fn parse_len(ex: &Expr) -> String {
             UnOp::Neg(_) => {
                 format!("-{}", parse_len(&unary.expr))
             }
-            _ => String::new(),
+            _ => todo!(),
         },
-        _ => String::new(),
+        Expr::Path(path) => path.path.segments.last().unwrap().ident.to_string(),
+        _ => todo!(),
     }
 }
 fn parse_from_file(path: &str) -> Vec<String> {
@@ -149,51 +147,53 @@ fn parse_from_file(path: &str) -> Vec<String> {
 }
 fn parse_struct(item_struct: ItemStruct) -> String {
     let mut s = format!(
-        "struct {}{} {{",
+        "struct {}{}",
         item_struct.ident,
         parse_generics(&item_struct.generics)
     );
-    for field in &item_struct.fields {
+    for (i, field) in item_struct.fields.iter().enumerate() {
         if let Some(ident) = &field.ident {
-            s += &format!("\n {} {ident};", parse_type(&field.ty))
+            s += &format!(" {ident}:{}", parse_type(&field.ty))
         } else {
-            s += &format!("\n {};", parse_type(&field.ty))
+            s += &format!(" f{i}:{}", parse_type(&field.ty))
         }
     }
-    format!("{s}\n}};")
+    s
 }
 fn parse_enum(item_enum: ItemEnum) -> String {
     let mut s = format!(
-        "enum {}{} {{",
+        "enum {}{}",
         item_enum.ident,
         parse_generics(&item_enum.generics)
     );
+    let mut i = 0;
     for var in &item_enum.variants {
         if let Some(d) = &var.discriminant {
             s += &format!(
-                "\n {}{} = {},",
+                " {}{}:{}",
                 var.ident,
                 parse_field(&var.fields),
                 parse_len(&d.1)
             )
         } else {
-            s += &format!("\n {}{},", var.ident, parse_field(&var.fields))
+            s += &format!(" {}{}:{i}", var.ident, parse_field(&var.fields));
+            i += 1;
         }
     }
-    format!("{s}\n}};")
+    s
 }
 fn parse_union(item_union: ItemUnion) -> String {
     let mut s = format!(
-        "union {}{} {{",
+        "union {}{}",
         item_union.ident,
         parse_generics(&item_union.generics)
     );
     for field in item_union.fields.named {
         if let Some(ident) = &field.ident {
-            s += &format!("\n {} {ident};", parse_type(&field.ty))
+            s += &format!(" {ident}:{}", parse_type(&field.ty))
         }
     }
-    format!("{s}\n}};")
+    s
 }
 fn parse_field(fields: &Fields) -> String {
     match fields {

@@ -49,7 +49,7 @@ public class RenameLuaFn extends GhidraScript {
 	Map<String, String> type_map = new HashMap<>();
 	Map<String, java.util.function.Function<List<String>, DataType>> generic_map = new HashMap<>();
     DataTypeManagerService svc;
-    
+
     protected void run() throws Exception {
         gstate = this.getState();
         program = gstate.getCurrentProgram();
@@ -67,13 +67,13 @@ public class RenameLuaFn extends GhidraScript {
     		type_map.put("u"+i, "uint"+i+"_t");
        		type_map.put("i"+i, "int"+i+"_t");
     	}
-    	parse_component_doc();
+    	//parse_component_doc();
         parse_rust();
     	rename_lua_fn();
     	rename_globals();
     	rename_functions();
     }
-    
+
     void parse_component_doc() throws Exception {
     	String file = "";
     	String[] components = file.split("\r\n\r\n");
@@ -81,7 +81,7 @@ public class RenameLuaFn extends GhidraScript {
     		parse_component(components[i]);
     	}
     }
-    
+
     DataType parse_component(String component) {
     	List<String> lines = component.lines().toList();
     	String name = lines.get(0);
@@ -95,11 +95,16 @@ public class RenameLuaFn extends GhidraScript {
     	}
     	return null;
     }
-    
+
     void parse_rust() throws Exception {
+        parse_file("/noita_entangled_worlds/noita_api/src/noita/types.rs");
+        parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
+    }
+
+    void parse_file(String file) throws Exception {
     	String folder = sourceFile.getParentFile().getAbsolutePath();
     	Runtime rt = Runtime.getRuntime();
-    	String[] commands = {folder + "/target/release/parse", folder + "/noita_entangled_worlds/noita_api/src/noita/types.rs"};
+    	String[] commands = {folder + "/target/release/parse", folder + file};
     	Process proc = rt.exec(commands);
     	BufferedReader std_input = new BufferedReader(new InputStreamReader(proc.getInputStream()));
     	List<String> lines = new ArrayList<>();
@@ -115,7 +120,7 @@ public class RenameLuaFn extends GhidraScript {
     		register_data_type(value, false);
     	}
     }
-    
+
     List<String> split_locally(String string, char delim, char lb, char rb) {
     	List<String> ret = new ArrayList<>();
     	int l = 0;
@@ -134,7 +139,7 @@ public class RenameLuaFn extends GhidraScript {
 		ret.add(string.substring(last));
     	return ret;
     }
-    
+
     DataType register_data_type(final String line, boolean ignore) {
 		String[] split = line.split(" ");
 		String name = split[1];
@@ -184,7 +189,7 @@ public class RenameLuaFn extends GhidraScript {
 				DataType type = parse_type(value);
 				union.add(type, type.getLength(), component, "");
 			}
-			return dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);    			
+			return dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
 		} else if (split[0].equals("enum")) {
 			EnumDataType enumt = create_enum(name);
 			for (int i = 2; i < split.length; i++) {
@@ -193,11 +198,11 @@ public class RenameLuaFn extends GhidraScript {
 				String value = pair[1];
 				enumt.add(component, Long.parseLong(value), "");
 			}
-			return dtm.addDataType(enumt, DataTypeConflictHandler.REPLACE_HANDLER);    			    			
+			return dtm.addDataType(enumt, DataTypeConflictHandler.REPLACE_HANDLER);
 		}
 		return null;
     }
-    
+
     DataType parse_type(String name) {
 		if (name.startsWith("*")) {
 			name = name.substring(1);
@@ -214,7 +219,7 @@ public class RenameLuaFn extends GhidraScript {
 			int split = name.lastIndexOf(";");
 			int len = Integer.parseInt(name.substring(split+1));
 			name = name.substring(0, split);
-			return new ArrayDataType(parse_type(name), len);			
+			return new ArrayDataType(parse_type(name), len);
 		}
 		if (type_map.containsKey(name)) {
 			name = type_map.get(name);
@@ -231,7 +236,7 @@ public class RenameLuaFn extends GhidraScript {
         }
         return null;
     }
-    
+
     private DataType find_type_in_manager(DataTypeManager datatypemanager, String name) {
         Iterator<DataType> types = datatypemanager.getAllDataTypes();
         while (types.hasNext()) {
@@ -246,17 +251,17 @@ public class RenameLuaFn extends GhidraScript {
         CategoryPath category = new CategoryPath("/custom");
         return new StructureDataType(category, name, 0);
     }
-    
+
     EnumDataType create_enum(String name) {
         CategoryPath category = new CategoryPath("/custom");
         return new EnumDataType(category, name, 1);
     }
-    
+
     UnionDataType create_union(String name) {
         CategoryPath category = new CategoryPath("/custom");
         return new UnionDataType(category, name);
     }
-    
+
     void rename_functions() throws Exception {
     	String[] fn_names = {"get_entity", "kill_entity", "create_entity"};
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590};
@@ -273,8 +278,8 @@ public class RenameLuaFn extends GhidraScript {
     			"component_type_manager", "component_tag_manager_ptr", "translation_manager",
     			"platform", "internal_filenames", "inventory_system",
     			"lua_mods", "max_component_id", "component_system_manager"};
-    	long[] addrs = {0x01204b98, 0x1205004, 0x1205024, 
-    			0x1208940, 0x122374c, 0x1206fac, 
+    	long[] addrs = {0x01204b98, 0x1205004, 0x1205024,
+    			0x1208940, 0x122374c, 0x1206fac,
     			0x1223c88, 0x1204b30, 0x1207c28,
     			0x1221bc0, 0x1207bd4, 0x12224f0,
     			0x1207e90, 0x1152ff0, 0x12236e8};
@@ -284,7 +289,7 @@ public class RenameLuaFn extends GhidraScript {
     		sym.setName(names[i], source);
     	}
     }
-    
+
     DataType create_type(String name, int size) {
         DataType existing = dtm.getDataType("custom/" + name);
         if (existing != null) {
@@ -298,7 +303,7 @@ public class RenameLuaFn extends GhidraScript {
     static String pascal_to_snake(String input) {
         return input.replaceAll("([a-z0-9])([A-Z])", "$1_$2").replaceAll("([A-Z])([A-Z][a-z])", "$1_$2").toLowerCase();
     }
-    
+
     void rename_lua_fn() throws Exception {
         DataType type = new PointerDataType(this.create_type("lua_state", 4), dtm);
         Address addr = space.getAddress(0x007ea410);
