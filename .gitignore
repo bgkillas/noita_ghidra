@@ -2,3 +2,6 @@
 .venv/
 .project/
 target/
+/RenameLuaFn.class
+/.project
+/.classpath

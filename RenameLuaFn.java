@@ -21,6 +21,8 @@ import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
+import ghidra.program.model.data.DataUtilities;
+import ghidra.program.model.data.DataUtilities.ClearDataMode;
 import ghidra.program.model.data.EnumDataType;
 import ghidra.program.model.data.FunctionDefinitionDataType;
 import ghidra.program.model.data.ParameterDefinition;
@@ -50,6 +52,7 @@ public class RenameLuaFn extends GhidraScript {
 	Map<String, java.util.function.Function<List<String>, DataType>> generic_map = new HashMap<>();
     DataTypeManagerService svc;
     List<String> failed = new ArrayList<>();
+    Listing listing;
 
     protected void run() throws Exception {
         gstate = this.getState();
@@ -60,6 +63,7 @@ public class RenameLuaFn extends GhidraScript {
         space = addressFactory.getDefaultAddressSpace();
         dtm = program.getDataTypeManager();
         svc = state.getTool().getService(DataTypeManagerService.class);
+        listing = currentProgram.getListing();
     	type_map.put("usize", "uint");
     	type_map.put("isize", "int");
     	type_map.put("f32", "float");
@@ -103,7 +107,6 @@ public class RenameLuaFn extends GhidraScript {
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
         for (String com: failed) {
         	DataType invKind = dtm.getDataType("/custom/" + com);
-            Listing listing = currentProgram.getListing();
             DataIterator it = listing.getData(true);
             while (it.hasNext() && !monitor.isCancelled()) {
                 Data d = it.next();
@@ -127,7 +130,7 @@ public class RenameLuaFn extends GhidraScript {
     	String line = null;
     	while ((line = std_input.readLine()) != null) {
     		if (line.split(" ", 3)[1].contains("<")) {
-    			lines.add(0,line);
+    			register_data_type(line, false);
     		} else {
     			lines.add(line);
     		}
@@ -221,7 +224,7 @@ public class RenameLuaFn extends GhidraScript {
     }
 
     DataType parse_type(DataType parent, String name) {
-		if (parent.getName().split("<")[0].equals(name.split("<")[0])) {
+		if (parent != null && parent.getName().split("<")[0].equals(name.split("<")[0])) {
 			return parent;
 		}
 		if (name.startsWith("*")) {
@@ -292,7 +295,7 @@ public class RenameLuaFn extends GhidraScript {
     		fn.setName(fn_names[i], source);
     	}
     }
-
+    
     void rename_globals() throws Exception {
        	String[] names = {"entity_manager_ptr", "world_seed", "new_game_count",
     			"global_stats", "game_global_ptr", "entity_tag_manager_ptr",
@@ -304,8 +307,16 @@ public class RenameLuaFn extends GhidraScript {
     			0x1223c88, 0x1204b30, 0x1207c28,
     			0x1221bc0, 0x1207bd4, 0x12224f0,
     			0x1207e90, 0x1152ff0, 0x12236e8};
+    	DataType[] types = {parse_type(null,"*EntityManager"),parse_type(null,"usize"),parse_type(null,"usize"),
+    			parse_type(null,"GlobalStats"),parse_type(null,"*GameGlobal"),parse_type(null,"*TagManager<u16>"),
+    			parse_type(null,"ComponentTypeManager"),parse_type(null,"*TagManager<u8>"),parse_type(null,"TranslationManager"),
+    			parse_type(null,"Platform"),parse_type(null,"StdVec<StdString>"),parse_type(null,"Inventory"),
+    			parse_type(null,"Mods"),parse_type(null,"usize"),parse_type(null,"ComponentSystemManager")};
     	for (int i = 0; i < addrs.length; i++) {
     		Address addr = space.getAddress(addrs[i]);
+    		DataType type = types[i];
+    		listing.clearCodeUnits(addr, addr.add(type.getLength() - 1), false);
+    		createData(addr, type);
     		Symbol sym = fpapi.getSymbolAt(addr);
     		sym.setName(names[i], source);
     	}
