@@ -21,8 +21,6 @@ import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
-import ghidra.program.model.data.DataUtilities;
-import ghidra.program.model.data.DataUtilities.ClearDataMode;
 import ghidra.program.model.data.EnumDataType;
 import ghidra.program.model.data.FunctionDefinitionDataType;
 import ghidra.program.model.data.ParameterDefinition;
@@ -36,6 +34,7 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 
@@ -285,14 +284,51 @@ public class RenameLuaFn extends GhidraScript {
         CategoryPath category = new CategoryPath("/custom");
         return new UnionDataType(category, name);
     }
+    
+    DataType parse(String name) {
+    	return parse_type(null, name);
+    }
 
     void rename_functions() throws Exception {
-    	String[] fn_names = {"get_entity", "kill_entity", "create_entity"};
-    	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590};
+    	String[] fn_names = {"get_entity", "kill_entity", "create_entity",
+    			"to_stdstring", "init_world_state", "create_component_by_name"};
+    	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590,
+    			0x0041dd60, 0x00636a00, 0x0056c8e0};
+    	DataType[] returns = {parse("*Entity"), null, parse("*Entity"),
+    			null, null, parse("*ComponentData")};
+    	DataType[][] params = {{parse("*EntityManager"), parse("usize")},
+    			{parse("*Entity")},
+    			{parse("*EntityManager")},
+    			{parse("*StdString"), parse("char[]"), parse("usize")},
+    			null,
+    			{parse("*StdString")}};
+    	String[][] params_names = {{"entity_manager_ptr", "index"},
+    			{"entity"},
+    			{"entity_manager_ptr"},
+    			{"stdstring_ptr", "string", "size"},
+    			null,
+    			{"name"}};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
     		Function fn = fpapi.getFunctionAt(addr);
     		fn.setName(fn_names[i], source);
+    		if (returns[i] != null) {
+    			fn.setReturnType(returns[i], source);
+    		}
+    		DataType[] param = params[i];
+    		String[] param_name = params_names[i];
+    		if (param != null) {
+                FunctionSignature sig = fn.getSignature();
+                ParameterDefinition[] args = sig.getArguments();
+                for (int j = 0; j < param.length;j++) {
+                	args[j].setName(param_name[j]);
+                   	args[j].setDataType(param[j]);
+                }
+                FunctionDefinitionDataType fddt = new FunctionDefinitionDataType(sig);
+                fddt.setArguments(args);
+                ApplyFunctionSignatureCmd cmd = new ApplyFunctionSignatureCmd(fn.getEntryPoint(), fddt, source);
+                this.runCommand(cmd);
+    		}
     	}
     }
     
@@ -301,17 +337,20 @@ public class RenameLuaFn extends GhidraScript {
     			"global_stats", "game_global_ptr", "entity_tag_manager_ptr",
     			"component_type_manager", "component_tag_manager_ptr", "translation_manager",
     			"platform", "internal_filenames", "inventory_system",
-    			"lua_mods", "max_component_id", "component_system_manager"};
+    			"lua_mods", "max_component_id", "component_system_manager",
+    			"world_state", "world_state_component"};
     	long[] addrs = {0x01204b98, 0x1205004, 0x1205024,
     			0x1208940, 0x122374c, 0x1206fac,
     			0x1223c88, 0x1204b30, 0x1207c28,
     			0x1221bc0, 0x1207bd4, 0x12224f0,
-    			0x1207e90, 0x1152ff0, 0x12236e8};
-    	DataType[] types = {parse_type(null,"*EntityManager"),parse_type(null,"usize"),parse_type(null,"usize"),
-    			parse_type(null,"GlobalStats"),parse_type(null,"*GameGlobal"),parse_type(null,"*TagManager<u16>"),
-    			parse_type(null,"ComponentTypeManager"),parse_type(null,"*TagManager<u8>"),parse_type(null,"TranslationManager"),
-    			parse_type(null,"Platform"),parse_type(null,"StdVec<StdString>"),parse_type(null,"Inventory"),
-    			parse_type(null,"Mods"),parse_type(null,"usize"),parse_type(null,"ComponentSystemManager")};
+    			0x1207e90, 0x1152ff0, 0x12236e8,
+    			0x01204bd0, 0x01205010};
+    	DataType[] types = {parse("*EntityManager"),parse("usize"),parse("usize"),
+    			parse("GlobalStats"),parse("*GameGlobal"),parse("*TagManager<u16>"),
+    			parse("ComponentTypeManager"),parse("*TagManager<u8>"),parse("TranslationManager"),
+    			parse("Platform"),parse("StdVec<StdString>"),parse("Inventory"),
+    			parse("Mods"),parse("usize"),parse("ComponentSystemManager"),
+    			parse("*Entity"),parse("*WorldStateComponent")};
     	for (int i = 0; i < addrs.length; i++) {
     		Address addr = space.getAddress(addrs[i]);
     		DataType type = types[i];
