@@ -68,7 +68,7 @@ fn parse_type(ty: &Type) -> String {
                 ..
             }) = &last.arguments
             {
-                if last.ident == "Option" {
+                if last.ident == "Option" || last.ident == "Vec" {
                     args.iter()
                         .map(|g| match g {
                             GenericArgument::Type(ty) => parse_type(ty),
