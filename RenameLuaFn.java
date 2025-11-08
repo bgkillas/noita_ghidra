@@ -1,5 +1,4 @@
 import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,8 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
-
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.app.script.GhidraScript;
@@ -31,8 +28,11 @@ import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.ProgramBasedDataTypeManager;
 import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.data.UnionDataType;
+import ghidra.program.model.listing.Data;
+import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
+import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
@@ -49,6 +49,7 @@ public class RenameLuaFn extends GhidraScript {
 	Map<String, String> type_map = new HashMap<>();
 	Map<String, java.util.function.Function<List<String>, DataType>> generic_map = new HashMap<>();
     DataTypeManagerService svc;
+    List<String> failed = new ArrayList<>();
 
     protected void run() throws Exception {
         gstate = this.getState();
@@ -63,6 +64,7 @@ public class RenameLuaFn extends GhidraScript {
     	type_map.put("isize", "int");
     	type_map.put("f32", "float");
     	type_map.put("f64", "double");
+    	type_map.put("c_void", "uint");
     	for (int i = 8; i < 128; i *= 2) {
     		type_map.put("u"+i, "uint"+i+"_t");
        		type_map.put("i"+i, "int"+i+"_t");
@@ -99,6 +101,20 @@ public class RenameLuaFn extends GhidraScript {
     void parse_rust() throws Exception {
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types.rs");
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
+        for (String com: failed) {
+        	DataType invKind = dtm.getDataType("/custom/" + com);
+            Listing listing = currentProgram.getListing();
+            DataIterator it = listing.getData(true);
+            while (it.hasNext() && !monitor.isCancelled()) {
+                Data d = it.next();
+                if (d.getBaseDataType() == invKind) {
+                    if (d.getLength() != invKind.getLength()) {
+                        clearListing(d.getMinAddress(), d.getMaxAddress());
+                        createData(d.getMinAddress(), invKind);
+                    }
+                }
+            }
+        }
     }
 
     void parse_file(String file) throws Exception {
@@ -163,6 +179,7 @@ public class RenameLuaFn extends GhidraScript {
 					while (matcher.find()) {
 						int pos = matcher.start() + 1;
 						rest = rest.substring(0, pos) + value + rest.substring(pos + generic.length());
+						matcher = pattern.matcher(rest);
 					}
 				}
 				String string = split[0] + " " + name_no_gen + "<" + join + ">" + " " + rest;
@@ -176,7 +193,7 @@ public class RenameLuaFn extends GhidraScript {
 				String[] pair = split[i].split(":");
 				String component = pair[0];
 				String value = pair[1];
-				DataType type = parse_type(value);
+				DataType type = parse_type(struct, value);
 				struct.add(type, type.getLength(), component, "");
 			}
 			return dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
@@ -186,7 +203,7 @@ public class RenameLuaFn extends GhidraScript {
 				String[] pair = split[i].split(":");
 				String component = pair[0];
 				String value = pair[1];
-				DataType type = parse_type(value);
+				DataType type = parse_type(union, value);
 				union.add(type, type.getLength(), component, "");
 			}
 			return dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
@@ -203,10 +220,13 @@ public class RenameLuaFn extends GhidraScript {
 		return null;
     }
 
-    DataType parse_type(String name) {
+    DataType parse_type(DataType parent, String name) {
+		if (parent.getName().split("<")[0].equals(name.split("<")[0])) {
+			return parent;
+		}
 		if (name.startsWith("*")) {
 			name = name.substring(1);
-			return new PointerDataType(parse_type(name));
+			return new PointerDataType(parse_type(parent, name));
 		}
 		if (name.endsWith(">")) {
 			int index = name.indexOf("<");
@@ -219,7 +239,7 @@ public class RenameLuaFn extends GhidraScript {
 			int split = name.lastIndexOf(";");
 			int len = Integer.parseInt(name.substring(split+1));
 			name = name.substring(0, split);
-			return new ArrayDataType(parse_type(name), len);
+			return new ArrayDataType(parse_type(parent, name), len);
 		}
 		if (type_map.containsKey(name)) {
 			name = type_map.get(name);
@@ -234,7 +254,8 @@ public class RenameLuaFn extends GhidraScript {
         		return type;
         	}
         }
-        return null;
+        failed.add(name);
+        return dtm.addDataType(create_struct(name), DataTypeConflictHandler.REPLACE_HANDLER);
     }
 
     private DataType find_type_in_manager(DataTypeManager datatypemanager, String name) {
