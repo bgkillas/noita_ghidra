@@ -1,4 +1,5 @@
 use quote::ToTokens;
+use regex::Regex;
 use std::env::args;
 use std::fs;
 use syn::{
@@ -8,18 +9,29 @@ use syn::{
 };
 fn main() {
     for arg in args().skip(1) {
-        if let Ok(iter) = fs::read_dir(&arg) {
-            for file in iter {
-                let strings = parse_from_file(file.unwrap().path().to_str().unwrap());
-                for s in strings {
-                    println!("{s}");
+        let mut strings = if let Ok(iter) = fs::read_dir(&arg) {
+            iter.flat_map(|file| parse_from_file(file.unwrap().path().to_str().unwrap()))
+                .collect()
+        } else {
+            parse_from_file(&arg)
+        };
+        for i in 0..strings.len() {
+            let s1 = strings.get(i).unwrap().clone();
+            let name = s1.split(" ").nth(1).unwrap();
+            for j in 0..strings.len() {
+                if i <= j {
+                    continue;
+                }
+                let s2 = strings.get(j).unwrap().clone();
+                let re = Regex::new(&format!("[^A-Za-z0-9]{name}([^A-Za-z0-9]|$)")).unwrap();
+                if re.is_match(&s2) {
+                    let s = strings.remove(i);
+                    strings.insert(j, s);
                 }
             }
-        } else {
-            let strings = parse_from_file(&arg);
-            for s in strings {
-                println!("{s}");
-            }
+        }
+        for s in strings {
+            println!("{s}");
         }
     }
 }
