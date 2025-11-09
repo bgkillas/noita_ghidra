@@ -294,27 +294,29 @@ public class RenameLuaFn extends GhidraScript {
     void rename_functions() throws Exception {
     	String[] fn_names = {"get_entity", "kill_entity", "create_entity",
     			"to_stdstring", "init_world_state", "create_component_by_name",
-    			"insert_component"};
+    			"insert_component", "init_entity_manager"};
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590,
     			0x0041dd60, 0x00636a00, 0x0056c8e0,
-    			0x0056f720};
+    			0x0056f720, 0x0056de10};
     	String[] returns = {"*Entity", null, "*Entity",
     			null, null, "*ComponentData",
-    			"*usize"};
+    			"*usize", "*EntityManager"};
     	String[][] params = {{"*EntityManager", "usize"},
     			{"*Entity"},
     			{"*EntityManager"},
     			{"*StdString", "char[]", "usize"},
     			null,
     			{"*StdString"},
-    			{"*EntityManager","*ComponentData"}};
+    			{"*EntityManager","*ComponentData"},
+    			{"*EntityManager"}};
     	String[][] params_names = {{"this", "index"},
     			{"entity"},
     			{"this"},
     			{"stdstring_ptr", "string", "size"},
     			null,
     			{"name"},
-    			{"this","component_data"}};
+    			{"this","component_data"},
+    			{"entity_manager"}};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
     		Function fn = fpapi.getFunctionAt(addr);
@@ -344,19 +346,19 @@ public class RenameLuaFn extends GhidraScript {
     			"component_type_manager", "component_tag_manager_ptr", "translation_manager",
     			"platform", "internal_filenames", "inventory_system",
     			"lua_mods", "max_component_id", "component_system_manager",
-    			"world_state", "world_state_component"};
+    			"world_state", "world_state_component", "event_manager_ptr"};
     	long[] addrs = {0x01204b98, 0x1205004, 0x1205024,
     			0x1208940, 0x122374c, 0x1206fac,
     			0x1223c88, 0x1204b30, 0x1207c28,
     			0x1221bc0, 0x1207bd4, 0x12224f0,
     			0x1207e90, 0x1152ff0, 0x12236e8,
-    			0x01204bd0, 0x01205010};
+    			0x1204bd0, 0x1205010, 0x1204b34};
     	String[] types = {"*EntityManager","usize","usize",
     			"GlobalStats","*GameGlobal","*TagManager<u16>",
     			"ComponentTypeManager","*TagManager<u8>","TranslationManager",
     			"Platform","StdVec<StdString>","Inventory",
     			"Mods","usize","ComponentSystemManager",
-    			"*Entity","*WorldStateComponent"};
+    			"*Entity","*WorldStateComponent","*EventManager"};
     	for (int i = 0; i < addrs.length; i++) {
     		Address addr = space.getAddress(addrs[i]);
     		DataType type = parse(types[i]);
