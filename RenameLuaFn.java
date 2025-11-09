@@ -298,16 +298,16 @@ public class RenameLuaFn extends GhidraScript {
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590,
     			0x0041dd60, 0x00636a00, 0x0056c8e0,
     			0x0056f720};
-    	DataType[] returns = {parse("*Entity"), null, parse("*Entity"),
-    			null, null, parse("*ComponentData"),
-    			parse("*usize")};
-    	DataType[][] params = {{parse("*EntityManager"), parse("usize")},
-    			{parse("*Entity")},
-    			{parse("*EntityManager")},
-    			{parse("*StdString"), parse("char[]"), parse("usize")},
+    	String[] returns = {"*Entity", null, "*Entity",
+    			null, null, "*ComponentData",
+    			"*usize"};
+    	String[][] params = {{"*EntityManager", "usize"},
+    			{"*Entity"},
+    			{"*EntityManager"},
+    			{"*StdString", "char[]", "usize"},
     			null,
-    			{parse("*StdString")},
-    			{parse("*EntityManager"),parse("*ComponentData")}};
+    			{"*StdString"},
+    			{"*EntityManager","*ComponentData"}};
     	String[][] params_names = {{"this", "index"},
     			{"entity"},
     			{"this"},
@@ -320,16 +320,20 @@ public class RenameLuaFn extends GhidraScript {
     		Function fn = fpapi.getFunctionAt(addr);
     		fn.setName(fn_names[i], source);
     		if (returns[i] != null) {
-    			fn.setReturnType(returns[i], source);
+    			fn.setReturnType(parse(returns[i]), source);
     		}
-    		DataType[] param = params[i];
+    		String[] param = params[i];
     		String[] param_name = params_names[i];
     		if (param != null) {
                 List<Variable> args = new ArrayList<>();
                 for (int j = 0; j < param.length;j++) {
-                	args.add(new ParameterImpl(param_name[j], param[j], program));
+            		args.add(new ParameterImpl(param_name[j], parse(param[j]), program));
                 }
                 fn.replaceParameters(args, FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, source);
+            	if (param_name[0].equals("this")) {
+        			fn.setCustomVariableStorage(true);
+            		fn.getParameter(0).setDataType(parse(param[0]), true, true, source);
+            	}
     		}
     	}
     }
@@ -347,15 +351,15 @@ public class RenameLuaFn extends GhidraScript {
     			0x1221bc0, 0x1207bd4, 0x12224f0,
     			0x1207e90, 0x1152ff0, 0x12236e8,
     			0x01204bd0, 0x01205010};
-    	DataType[] types = {parse("*EntityManager"),parse("usize"),parse("usize"),
-    			parse("GlobalStats"),parse("*GameGlobal"),parse("*TagManager<u16>"),
-    			parse("ComponentTypeManager"),parse("*TagManager<u8>"),parse("TranslationManager"),
-    			parse("Platform"),parse("StdVec<StdString>"),parse("Inventory"),
-    			parse("Mods"),parse("usize"),parse("ComponentSystemManager"),
-    			parse("*Entity"),parse("*WorldStateComponent")};
+    	String[] types = {"*EntityManager","usize","usize",
+    			"GlobalStats","*GameGlobal","*TagManager<u16>",
+    			"ComponentTypeManager","*TagManager<u8>","TranslationManager",
+    			"Platform","StdVec<StdString>","Inventory",
+    			"Mods","usize","ComponentSystemManager",
+    			"*Entity","*WorldStateComponent"};
     	for (int i = 0; i < addrs.length; i++) {
     		Address addr = space.getAddress(addrs[i]);
-    		DataType type = types[i];
+    		DataType type = parse(types[i]);
     		listing.clearCodeUnits(addr, addr.add(type.getLength() - 1), false);
     		createData(addr, type);
     		Symbol sym = fpapi.getSymbolAt(addr);
