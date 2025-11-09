@@ -31,10 +31,12 @@ import ghidra.program.model.data.UnionDataType;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.listing.Variable;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 
@@ -291,23 +293,28 @@ public class RenameLuaFn extends GhidraScript {
 
     void rename_functions() throws Exception {
     	String[] fn_names = {"get_entity", "kill_entity", "create_entity",
-    			"to_stdstring", "init_world_state", "create_component_by_name"};
+    			"to_stdstring", "init_world_state", "create_component_by_name",
+    			"insert_component"};
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590,
-    			0x0041dd60, 0x00636a00, 0x0056c8e0};
+    			0x0041dd60, 0x00636a00, 0x0056c8e0,
+    			0x0056f720};
     	DataType[] returns = {parse("*Entity"), null, parse("*Entity"),
-    			null, null, parse("*ComponentData")};
+    			null, null, parse("*ComponentData"),
+    			parse("*usize")};
     	DataType[][] params = {{parse("*EntityManager"), parse("usize")},
     			{parse("*Entity")},
     			{parse("*EntityManager")},
     			{parse("*StdString"), parse("char[]"), parse("usize")},
     			null,
-    			{parse("*StdString")}};
-    	String[][] params_names = {{"entity_manager_ptr", "index"},
+    			{parse("*StdString")},
+    			{parse("*EntityManager"),parse("*ComponentData")}};
+    	String[][] params_names = {{"this", "index"},
     			{"entity"},
-    			{"entity_manager_ptr"},
+    			{"this"},
     			{"stdstring_ptr", "string", "size"},
     			null,
-    			{"name"}};
+    			{"name"},
+    			{"this","component_data"}};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
     		Function fn = fpapi.getFunctionAt(addr);
@@ -318,16 +325,11 @@ public class RenameLuaFn extends GhidraScript {
     		DataType[] param = params[i];
     		String[] param_name = params_names[i];
     		if (param != null) {
-                FunctionSignature sig = fn.getSignature();
-                ParameterDefinition[] args = sig.getArguments();
+                List<Variable> args = new ArrayList<>();
                 for (int j = 0; j < param.length;j++) {
-                	args[j].setName(param_name[j]);
-                   	args[j].setDataType(param[j]);
+                	args.add(new ParameterImpl(param_name[j], param[j], program));
                 }
-                FunctionDefinitionDataType fddt = new FunctionDefinitionDataType(sig);
-                fddt.setArguments(args);
-                ApplyFunctionSignatureCmd cmd = new ApplyFunctionSignatureCmd(fn.getEntryPoint(), fddt, source);
-                this.runCommand(cmd);
+                fn.replaceParameters(args, FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, source);
     		}
     	}
     }
