@@ -5,3 +5,4 @@ target/
 /RenameLuaFn.class
 /.project
 /.classpath
+/components.rs
