@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Scanner;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
@@ -114,7 +115,7 @@ public class RenameLuaFn extends GhidraScript {
     	}
     	Files.writeString(Path.of(folder + "/components.rs"), rust);
     }
-    
+
     int parse_hex(String str) {
     	if (str.startsWith("0x")) {
     		return Integer.parseInt(str.substring(2), 16);
@@ -125,11 +126,11 @@ public class RenameLuaFn extends GhidraScript {
     String parse_component(String component) throws Exception {
     	String[] lines = component.split("\n");
     	String name = lines[0];
-    	Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> tuple = get_struct(name);
+    	Triple<StructureDataType, List<Triple<String, Integer, Integer>>, Address> tuple = get_struct(name);
     	StructureDataType struct = tuple.a;
     	List<Triple<String, Integer, Integer>> list = tuple.b;
+    	Address vftable = tuple.c;
 		struct.replaceAtOffset(0, parse("ComponentData"), 72, "base", "");
-		String s = "";
     	for (int i = 1; i < lines.length;i++) {
     		String line = normalize(lines[i]);
     		String[] desc_split = line.split("\"");
@@ -151,12 +152,11 @@ public class RenameLuaFn extends GhidraScript {
     			if (desc.length() == 0) {
         			desc += "Default: " + def;
     			} else if (desc.endsWith(".")) {
-    				desc += " Default: " + def;    					
+    				desc += " Default: " + def;
     			} else {
     				desc += ". Default: " + def;
     			}
     		}
-    		s += type + "\n";
     		int j = 0;
     		for (Triple<String, Integer, Integer> tup: list) {
     			if (tup.a.equals(field)) {
@@ -181,16 +181,83 @@ public class RenameLuaFn extends GhidraScript {
     		}
     		struct.replaceAtOffset(field_offset, data, field_size, field, desc);
     	}
+		String s = "#[derive(Debug)]\n"
+				+ "#[repr(C)]\n"
+				+ "pub struct " + name + " {\n";
+    	for (DataTypeComponent com: struct.getComponents()) {
+    		if (com.getComment() != null && com.getComment().length() != 0) {
+    			s += "    //" + com.getComment() + "\n";
+    		}
+    		if (com.getFieldName() == null) {
+    			s += "    " + "f" + Integer.toString(com.getOffset(), 16) + ": u8,\n";
+    		} else {
+				s += "    pub " + com.getFieldName() + ": " + unparse(com.getDataType().getName()) +",\n";
+    		}
+    	}
+    	s += "}\n";
     	for (DataTypeComponent com: struct.getComponents()) {
     		if (com.getFieldName() == null) {
     			struct.replaceAtOffset(com.getOffset(), parse("u8"), 1, "f"+Integer.toString(com.getOffset(), 16), "");
     		}
     	}
+    	s += "impl Default for " + name + "{\n";
+    	for (DataTypeComponent com: struct.getComponents()) {
+    		String def;
+    		if (com.getComment() == null) {
+    			def = "default()";
+    		} else {
+    			int n = com.getComment().indexOf("Default: ");
+    			if (n == -1) {
+        			def = "default()";
+    			} else {
+    				def = com.getComment().substring(n + "Default: ".length());
+    				if (!def.matches("[0-9]*\\.*[0-9]*")) {
+    					def = "\""+def+"\"";
+    				}
+    			}
+    		}
+			s += "    " + com.getFieldName() + ": " + def +",\n";
+    	}
+    	s += "}\n";
+    	s += "impl Component for " + name + "{\n"
+    			+ "    fn default(base: ComponentData) -> Self {\n"
+    			+ "        Self {\n"
+    			+ "            base,\n"
+    			+ "            ..Default::default()\n"
+    			+ "        }\n"
+    			+ "    }\n"
+    			+ "    const VTABLE: &'static ComponentVTable =\n"
+    			+ "        unsafe { (0x"+vftable+" as *const ComponentVTable).as_ref().unwrap() };\n"
+    			+ "    const NAME: &'static str = \""+name+"\";\n"
+    			+ "    const C_NAME: CString = const { CString::from_str(\""+name+"\\0\") };\n"
+    			+ "}\n";
     	dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
     	return s;
     }
-    
-    Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> get_struct(String name) throws Exception {
+
+    String unparse(String t) {
+		if (type_map.containsValue(t)) {
+			for (Entry<String, String> entry: type_map.entrySet()) {
+				if (entry.getValue().equals(t)) {
+					return entry.getKey();
+				}
+			}
+			return null;
+		}
+		if (t.endsWith(" *")) {
+			return "&'static mut " + unparse(t.substring(0, t.length() - 2));
+		}
+		if (t.endsWith("*")) {
+			return "&'static mut " + unparse(t.substring(0, t.length() - 1));
+		}
+		if (t.endsWith(">")) {
+			int start = t.indexOf("<");
+			return t.substring(0, start + 1) + unparse(t.substring(start + 1, t.length() - 1)) + ">";
+		}
+		return t;
+    }
+
+    Triple<StructureDataType, List<Triple<String, Integer, Integer>>,Address> get_struct(String name) throws Exception {
 		Address vftable = null;
 		Symbol sym = table.getClassSymbol(name, null);
 		for (Symbol s:table.getChildren(sym)) {
@@ -231,10 +298,10 @@ public class RenameLuaFn extends GhidraScript {
 		for (String line: lines) {
 			if (line.contains("}")) {
 				if (!line.startsWith(" ")) {
-					return new Tuple<>(struct, list);					
+					return new Triple<>(struct, list, vftable);
 				}
 				list.add(new Triple<>(field_name, field_size, field_offset));
-			} 
+			}
 			int start = line.indexOf(",");
 			if (start != -1) {
 				line = line.substring(start + 1);
@@ -259,7 +326,7 @@ public class RenameLuaFn extends GhidraScript {
 			start = line.indexOf("[2]");
 			if (start != -1) {
 				line = line.substring(start + 6);
-				field_size = parse_hex(line.substring(0, line.length() - 1));				
+				field_size = parse_hex(line.substring(0, line.length() - 1));
 			}
 			start = line.indexOf("+");
 			if (start != -1) {
@@ -267,7 +334,7 @@ public class RenameLuaFn extends GhidraScript {
 				field_offset = parse_hex(line.substring(0, line.length() - 1));
 			}
 		}
-		return new Tuple<>(struct, list);
+		return new Triple<>(struct, list, vftable);
     }
     class Tuple<T,K> {
     	T a;
@@ -287,7 +354,7 @@ public class RenameLuaFn extends GhidraScript {
     		this.c = c;
     	}
     }
-    
+
     String normalize(String line) {
     	line = line.trim();
     	line = line.replace("std::vector< int >", "std::vector<int>")
@@ -395,12 +462,12 @@ public class RenameLuaFn extends GhidraScript {
     			.replace("Unsigned", "usize") + line.substring(n);
     	return res;
     }
-    
+
     void parse_rust() throws Exception {
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types.rs");
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
     }
-    
+
     void run_fails() throws Exception {
         for (String com: failed) {
         	DataType invKind = dtm.getDataType("/custom/" + com);
@@ -593,7 +660,7 @@ public class RenameLuaFn extends GhidraScript {
         CategoryPath category = new CategoryPath("/custom");
         return new UnionDataType(category, name);
     }
-    
+
     DataType parse(String name) {
     	return parse_type(null, name);
     }
@@ -648,7 +715,7 @@ public class RenameLuaFn extends GhidraScript {
     		}
     	}
     }
-    
+
     void rename_globals() throws Exception {
        	String[] names = {"entity_manager_ptr", "world_seed", "new_game_count",
     			"global_stats", "game_global_ptr", "entity_tag_manager_ptr",
