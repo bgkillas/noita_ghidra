@@ -13,6 +13,9 @@ import java.util.Scanner;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.apache.commons.lang3.arch.Processor.Type;
+
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.app.script.GhidraScript;
@@ -87,10 +90,15 @@ public class RenameLuaFn extends GhidraScript {
     	}
         parse_rust();
     	parse_component_doc();
+    	parse_vtables();
     	run_fails();
     	rename_lua_fn();
     	rename_globals();
     	rename_functions();
+    }
+    
+    void parse_vtables() throws Exception {
+    	
     }
 
     void parse_component_doc() throws Exception {
@@ -109,7 +117,7 @@ public class RenameLuaFn extends GhidraScript {
     		}
     	}
     	reader.close();
-    	String rust = "";
+    	String rust = "use crate::noita::types::*;\n";
     	for (String com: components) {
     		rust += parse_component(com);
     	}
@@ -165,6 +173,11 @@ public class RenameLuaFn extends GhidraScript {
     			j += 1;
     		}
     		field = pascal_to_snake(field);
+    		if (field.equals("type")) {
+    			field = "arc_type";
+    		} else if (field.equals("loop")) {
+    			field = "loops";
+    		}
     		Triple<String, Integer, Integer> tup = list.get(j);
     		int field_size = tup.b;
     		int field_offset = tup.c;
@@ -200,26 +213,38 @@ public class RenameLuaFn extends GhidraScript {
     			struct.replaceAtOffset(com.getOffset(), parse("u8"), 1, "f"+Integer.toString(com.getOffset(), 16), "");
     		}
     	}
-    	s += "impl Default for " + name + "{\n";
+    	s += "impl Default for " + name + " {\n"
+    			+ "    fn default() -> Self {\n"
+    			+ "        Self {\n";
     	for (DataTypeComponent com: struct.getComponents()) {
     		String def;
     		if (com.getComment() == null) {
-    			def = "default()";
+    			def = "Default::default()";
     		} else {
     			int n = com.getComment().indexOf("Default: ");
     			if (n == -1) {
-        			def = "default()";
+        			def = "Default::default()";
     			} else {
     				def = com.getComment().substring(n + "Default: ".length());
-    				if (!def.matches("[0-9]*\\.*[0-9]*")) {
-    					def = "\""+def+"\"";
+    				if (!def.matches("-*[0-9]*\\.*[0-9]*")) {
+    					def = "StdString::from_str(\""+def+"\")";
+    				} else if (def.matches("-*[0-9]*") && unparse(com.getDataType().getName()).matches("f[0-9]+")) {
+    					def += ".0";
+    				} else if (com.getDataType().getName().equals("bool")) {
+    					if (def.equals("0")) {
+    						def = "false";
+    					} else if (def.equals("1")) {
+    						def = "true";
+    					}
     				}
     			}
     		}
-			s += "    " + com.getFieldName() + ": " + def +",\n";
+			s += "            " + com.getFieldName() + ": " + def +",\n";
     	}
-    	s += "}\n";
-    	s += "impl Component for " + name + "{\n"
+    	s += "        }\n"
+    			+ "    }\n"
+    			+ "}\n";
+    	s += "impl Component for " + name + " {\n"
     			+ "    fn default(base: ComponentData) -> Self {\n"
     			+ "        Self {\n"
     			+ "            base,\n"
@@ -229,7 +254,7 @@ public class RenameLuaFn extends GhidraScript {
     			+ "    const VTABLE: &'static ComponentVTable =\n"
     			+ "        unsafe { (0x"+vftable+" as *const ComponentVTable).as_ref().unwrap() };\n"
     			+ "    const NAME: &'static str = \""+name+"\";\n"
-    			+ "    const C_NAME: CString = const { CString::from_str(\""+name+"\\0\") };\n"
+    			+ "    const C_NAME: CString = CString::from_str(\""+name+"\\0\");\n"
     			+ "}\n";
     	dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
     	return s;
@@ -245,10 +270,15 @@ public class RenameLuaFn extends GhidraScript {
 			return null;
 		}
 		if (t.endsWith(" *")) {
-			return "&'static mut " + unparse(t.substring(0, t.length() - 2));
+			return "*mut " + unparse(t.substring(0, t.length() - 2));
 		}
 		if (t.endsWith("*")) {
-			return "&'static mut " + unparse(t.substring(0, t.length() - 1));
+			return "*mut " + unparse(t.substring(0, t.length() - 1));
+		}
+		if (t.endsWith("]")) {
+			int n = t.lastIndexOf('[');
+			int k = Integer.parseInt(t.substring(n + 1, t.length() - 1));
+			return "[" + t.substring(0, n) + ";"+k+"]";
 		}
 		if (t.endsWith(">")) {
 			int start = t.indexOf("<");
@@ -434,6 +464,7 @@ public class RenameLuaFn extends GhidraScript {
     			.replace("Uint", "usize")
     			.replace("Npcparty", "NpcParty")
     			.replace("Pendingportal", "PendingPortal")
+    			.replace("StdString", "Stdstring")
     			.replace("String", "Stdstring")
     			.replace("Str", "Stdstring")
     			.replace("Stdstring", "StdString")
@@ -442,10 +473,10 @@ public class RenameLuaFn extends GhidraScript {
     			.replace("ValueRange", "Valuerange<f32>")
     			.replace("Valuerange", "ValueRange")
     			.replace("Float", "f32")
+    			.replace("float", "f32")
     			.replace("Double", "f64")
     			.replace("Entityid", "EntityId")
     			.replace("Cutthroughworld", "CutThroughWorld")
-    			.replace("StdStdString", "StdVec<StdString>")
     			.replace("Jumpparams", "JumpParams")
     			.replace("Inventoryitem", "InventoryItem")
     			.replace("StackAnimationstate", "StackAnimationState")
@@ -459,6 +490,9 @@ public class RenameLuaFn extends GhidraScript {
     			.replace("Aabb", "AABB")
     			.replace("Icell", "ICell")
     			.replace("MovetosurfaceType", "MoveToSurfaceType")
+    			.replace("Fcolor", "Color")
+    			.replace("Ivec2", "IVec2")
+    			.replace("OfMaterials", "Materials")
     			.replace("Unsigned", "usize") + line.substring(n);
     	return res;
     }
@@ -691,7 +725,7 @@ public class RenameLuaFn extends GhidraScript {
     			null,
     			{"name"},
     			{"this","component_data"},
-    			{"entity_manager"},
+    			{"entity_manager_ptr"},
     			{"stdstring", "chars"}};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
