@@ -1,10 +1,15 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
+import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
@@ -37,8 +42,10 @@ import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Variable;
+import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolTable;
 
 public class RenameLuaFn extends GhidraScript {
     GhidraState gstate;
@@ -54,6 +61,7 @@ public class RenameLuaFn extends GhidraScript {
     DataTypeManagerService svc;
     List<String> failed = new ArrayList<>();
     Listing listing;
+    SymbolTable table;
 
     protected void run() throws Exception {
         gstate = this.getState();
@@ -65,47 +73,329 @@ public class RenameLuaFn extends GhidraScript {
         dtm = program.getDataTypeManager();
         svc = state.getTool().getService(DataTypeManagerService.class);
         listing = currentProgram.getListing();
+        table = program.getSymbolTable();
     	type_map.put("usize", "uint");
     	type_map.put("isize", "int");
     	type_map.put("f32", "float");
     	type_map.put("f64", "double");
     	type_map.put("c_void", "uint");
     	for (int i = 8; i < 128; i *= 2) {
-    		type_map.put("u"+i, "uint"+i+"_t");
-       		type_map.put("i"+i, "int"+i+"_t");
+    		type_map.put("u"+i, "uint"+i);
+       		type_map.put("i"+i, "int"+i);
     	}
-    	//parse_component_doc();
         parse_rust();
+    	parse_component_doc();
+    	run_fails();
     	rename_lua_fn();
     	rename_globals();
     	rename_functions();
     }
 
     void parse_component_doc() throws Exception {
-    	String file = "";
-    	String[] components = file.split("\r\n\r\n");
-    	for (int i = 0; i < components.length - 1;i++) {
-    		parse_component(components[i]);
-    	}
-    }
-
-    DataType parse_component(String component) {
-    	List<String> lines = component.lines().toList();
-    	String name = lines.get(0);
-    	for (int i = 1; i < lines.size();i++) {
-    		String line = lines.get(i);
-    		String[] desc_split = line.split("\"");
-    		if (desc_split.length == 3) {
-    			String desc = desc_split[1];
-    			line = desc_split[0];
+    	String folder = sourceFile.getParentFile().getAbsolutePath();
+    	File file = new File(folder + "/component_documentation.txt");
+    	Scanner reader = new Scanner(file);
+    	List<String> components = new ArrayList<>();
+    	String cur = "";
+    	while (reader.hasNextLine()) {
+    		String line = reader.nextLine();
+    		if (line.length() == 0) {
+    			components.add(cur.substring(1));
+    			cur = "";
+    		} else {
+    			cur += "\n" + line;
     		}
     	}
-    	return null;
+    	reader.close();
+    	String rust = "";
+    	for (String com: components) {
+    		rust += parse_component(com);
+    	}
+    	Files.writeString(Path.of(folder + "/components.rs"), rust);
+    }
+    
+    int parse_hex(String str) {
+    	if (str.startsWith("0x")) {
+    		return Integer.parseInt(str.substring(2), 16);
+    	}
+    	return Integer.parseInt(str);
     }
 
+    String parse_component(String component) throws Exception {
+    	String[] lines = component.split("\n");
+    	String name = lines[0];
+    	Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> tuple = get_struct(name);
+    	StructureDataType struct = tuple.a;
+    	List<Triple<String, Integer, Integer>> list = tuple.b;
+		struct.replaceAtOffset(0, parse("ComponentData"), 72, "base", "");
+		String s = "";
+    	for (int i = 1; i < lines.length;i++) {
+    		String line = normalize(lines[i]);
+    		String[] desc_split = line.split("\"");
+    		if (!line.contains("\"")) {
+    			continue;
+    		}
+    		String desc;
+    		if (desc_split.length == 1) {
+    			desc = "";
+    		} else {
+    			desc = desc_split[1];
+    		}
+    		line = desc_split[0].trim().replaceAll(" +", " ");
+    		String[] parts = line.split(" ");
+    		String type = parts[0];
+    		String field = parts[1];
+    		String def = parts[2];
+    		if (!def.equals("-")) {
+    			if (desc.length() == 0) {
+        			desc += "Default: " + def;
+    			} else if (desc.endsWith(".")) {
+    				desc += " Default: " + def;    					
+    			} else {
+    				desc += ". Default: " + def;
+    			}
+    		}
+    		s += type + "\n";
+    		int j = 0;
+    		for (Triple<String, Integer, Integer> tup: list) {
+    			if (tup.a.equals(field)) {
+    				break;
+    			}
+    			j += 1;
+    		}
+    		field = pascal_to_snake(field);
+    		Triple<String, Integer, Integer> tup = list.get(j);
+    		int field_size = tup.b;
+    		int field_offset = tup.c;
+    		boolean array = type.endsWith("ArrayInline");
+    		type = type.replace("ArrayInline", "");
+    		DataType data;
+    		if (type.endsWith("::enum")) {
+    			data = create_enum_with(type.substring(0, type.length() - 6), field_size);
+    		} else {
+    			data = parse(type);
+    		}
+       		if (array) {
+    			data = new ArrayDataType(data, field_size / data.getLength());
+    		}
+    		struct.replaceAtOffset(field_offset, data, field_size, field, desc);
+    	}
+    	dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
+    	return s;
+    }
+    
+    Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> get_struct(String name) throws Exception {
+		Address vftable = null;
+		Symbol sym = table.getClassSymbol(name, null);
+		for (Symbol s:table.getChildren(sym)) {
+			if (s.getName().equals("vftable")) {
+				vftable = s.getAddress();
+				break;
+			}
+		}
+		if (vftable == null) {
+			return null;
+		}
+		Reference ref = fpapi.getReferencesTo(vftable)[0];
+		Function fun = fpapi.getFunctionContaining(ref.getFromAddress());
+		int size = 0;
+		for (Reference parent: fpapi.getReferencesTo(fun.getEntryPoint())) {
+			Function fn = fpapi.getFunctionContaining(parent.getFromAddress());
+			String decomp = fdapi.decompile(fn);
+			if (decomp.contains("operator_new(")) {
+				decomp = decomp.split("operator_new\\(")[1];
+				size = parse_hex(decomp.split("\\)")[0]);
+			}
+		}
+		if (size == 0) {
+			String decomp = fdapi.decompile(fun);
+			decomp = decomp.split("operator_new\\(")[1];
+			size = parse_hex(decomp.split("\\)")[0]);
+		}
+		StructureDataType struct = create_struct_with(name, size);
+		int lua_get = fpapi.getInt(vftable.add(4*14));
+		Address lua_addr = addressFactory.getAddress(Integer.toString(lua_get,16));
+		Function lua_fn = fpapi.getFunctionAt(lua_addr);
+		String lua = fdapi.decompile(lua_fn);
+		String[] lines = lua.split("\n");
+		int field_size = 0;
+		int field_offset = 0;
+		String field_name = "";
+		List<Triple<String, Integer, Integer>> list = new ArrayList<>();
+		for (String line: lines) {
+			if (line.contains("}")) {
+				if (!line.startsWith(" ")) {
+					return new Tuple<>(struct, list);					
+				}
+				list.add(new Triple<>(field_name, field_size, field_offset));
+			} 
+			int start = line.indexOf(",");
+			if (start != -1) {
+				line = line.substring(start + 1);
+				start = line.indexOf(")");
+				line = line.substring(0, start);
+				if (line.startsWith("\"")) {
+					field_name = line.substring(1, line.length() - 1);
+				} else {
+					Address addr = addressFactory.getAddress(line.substring(6));
+					if (addr == null) {
+						continue;
+					}
+					field_name = "";
+					byte b = fpapi.getByte(addr);
+					while (b != 0) {
+						field_name += (char) b;
+						addr = addr.add(1);
+						b = fpapi.getByte(addr);
+					}
+				}
+			}
+			start = line.indexOf("[2]");
+			if (start != -1) {
+				line = line.substring(start + 6);
+				field_size = parse_hex(line.substring(0, line.length() - 1));				
+			}
+			start = line.indexOf("+");
+			if (start != -1) {
+				line = line.substring(start + 2);
+				field_offset = parse_hex(line.substring(0, line.length() - 1));
+			}
+		}
+		return new Tuple<>(struct, list);
+    }
+    class Tuple<T,K> {
+    	T a;
+    	K b;
+    	Tuple(T a, K b) {
+    		this.a = a;
+    		this.b = b;
+    	}
+    }
+    class Triple<T,K,V> {
+    	T a;
+    	K b;
+    	V c;
+    	Triple(T a, K b, V c) {
+    		this.a = a;
+    		this.b = b;
+    		this.c = c;
+    	}
+    }
+    
+    String normalize(String line) {
+    	line = line.trim();
+    	line = line.replace("std::vector< int >", "std::vector<int>")
+    			.replace("std::vector< float >", "std::vector<float>")
+    			.replace("unsigned int", "uint");
+    	line = line.replace("Vec2", "vec2");
+		int n = line.indexOf(" ");
+    	String[] vecs = {"Vector", "VECTOR", "Vec", "VEC"};
+    	for (String s: vecs) {
+    		line = line.substring(0, n).replace(s + "_", "Vec").replace("_" + s, "Vec").replace(s, "Vec") + line.substring(n);
+        	n = line.indexOf(" ");
+    	}
+    	line = line.substring(0, n).replace("TeleportComponentState::Enumstate", "TeleportComponentState::Enum state")
+		.replace("PathFindingComponentState::EnummState", "PathFindingComponentState::Enum mState")
+		.replace("MSG_QUEUE_PATH_FINDING_RESULTjob_result_receiver", "MSG_QUEUE_PATH_FINDING_RESULT job_result_receiver")
+		.replace("ParticleEmitter_Animation*m_cached_image_animation","ParticleEmitter_Animation* m_cached_image_animation")
+		.replace("PARTICLE_EMITTER_CUSTOM_STYLE::Enumcustom_style", "PARTICLE_EMITTER_CUSTOM_STYLE::Enum custom_style")
+		.replace("NINJA_ROPE_SEGMENTVecmSegments", "NINJA_ROPE_SEGMENTVec mSegments")
+		.replace("MOVETOSURFACE_TYPE::Enumtype", "MOVETOSURFACE_TYPE::Enum type")
+		.replace("InvenentoryUpdateListener*update_listener", "InvenentoryUpdateListener* update_listener")
+		.replace("EXPLOSION_TRIGGER_TYPE::Enumtrigger", "EXPLOSION_TRIGGER_TYPE::Enum trigger")
+		.replace("::Enum", "::enum")
+		.replace("std::vector", "StdVec")
+		.replace("std::vec", "StdVec")
+		.replace("std::set", "StdSet")
+		.replace("std_string", "StdString")
+		.replace("types::", "")
+		.replace("grid::", "")
+		.replace("as::", "")
+		.replace("std::string", "StdString") + line.substring(n);
+    	n = line.indexOf(" ");
+    	if (line.startsWith("Vec")) {
+    		line = line.replace("Vec", "StdVec<");
+    		n = line.indexOf(" ");
+    		line = line.substring(0, n) + ">" + line.substring(n);
+    	}
+    	n = line.indexOf(" ");
+    	if (line.substring(0, n).endsWith("Vec")) {
+    		line = "StdVec<" + line.replace("Vec", "");
+    		n = line.indexOf(" ");
+    		line = line.substring(0, n) + ">" + line.substring(n);
+    	}
+    	n = line.indexOf(" ");
+    	line = line.substring(0, n).replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase() + line.substring(n);
+        Pattern pattern = Pattern.compile("(_|[0-9])([a-z])");
+        Matcher matcher = pattern.matcher(line.substring(0, n));
+        String res = "";
+        int i = 0;
+        while (matcher.find()) {
+    		MatchResult match = matcher.toMatchResult();
+    		String l;
+    		if (line.substring(match.start(), match.start() + 1).equals("_")) {
+    			l = line.substring(match.start() + 1, match.end());
+    		} else {
+    			l = line.substring(match.start(), match.end());
+
+    		}
+    		res += line.substring(i, match.start()) + l.toUpperCase();
+    		i = match.end();
+    	}
+    	n = line.indexOf(" ");
+        res += line.substring(i, n);
+        res = res.substring(0, 1).toUpperCase() + res.substring(1);
+    	n = res.indexOf("<");
+    	if (n != -1) {
+    		res = res.substring(0, n) + res.substring(n, n + 1).toUpperCase() + res.substring(n+1);
+    	}
+    	n = line.indexOf(" ");
+    	res = res.replace("Uint16", "u16")
+    			.replace("Uint32T", "u32")
+    			.replace("Uint32", "u32")
+    			.replace("Int32", "i32")
+    			.replace("Int16", "i16")
+    			.replace("Int64", "i64")
+    			.replace("Int", "isize")
+    			.replace("Uint64", "u64")
+    			.replace("Uint", "usize")
+    			.replace("Npcparty", "NpcParty")
+    			.replace("Pendingportal", "PendingPortal")
+    			.replace("String", "Stdstring")
+    			.replace("Str", "Stdstring")
+    			.replace("Stdstring", "StdString")
+    			.replace("IklimbState", "IKLimbState")
+    			.replace("ValueRangeisize", "Valuerange<isize>")
+    			.replace("ValueRange", "Valuerange<f32>")
+    			.replace("Valuerange", "ValueRange")
+    			.replace("Float", "f32")
+    			.replace("Double", "f64")
+    			.replace("Entityid", "EntityId")
+    			.replace("Cutthroughworld", "CutThroughWorld")
+    			.replace("StdStdString", "StdVec<StdString>")
+    			.replace("Jumpparams", "JumpParams")
+    			.replace("Inventoryitem", "InventoryItem")
+    			.replace("StackAnimationstate", "StackAnimationState")
+    			.replace("MapStdStringStdString", "StdMap<StdString,StdString>")
+    			.replace("Aidata*", "AIData*")
+    			.replace("AiStateStack", "AIStateStack")
+    			.replace("ConfigDrug_fx", "ConfigDrugFx")
+    			.replace("Bool", "bool")
+    			.replace("Pathnode", "PathNode")
+    			.replace("Iaabb", "IAABB")
+    			.replace("Aabb", "AABB")
+    			.replace("Icell", "ICell")
+    			.replace("MovetosurfaceType", "MoveToSurfaceType")
+    			.replace("Unsigned", "usize") + line.substring(n);
+    	return res;
+    }
+    
     void parse_rust() throws Exception {
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types.rs");
         parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
+    }
+    
+    void run_fails() throws Exception {
         for (String com: failed) {
         	DataType invKind = dtm.getDataType("/custom/" + com);
             DataIterator it = listing.getData(true);
@@ -129,6 +419,8 @@ public class RenameLuaFn extends GhidraScript {
     	BufferedReader std_input = new BufferedReader(new InputStreamReader(proc.getInputStream()));
     	List<String> lines = new ArrayList<>();
     	String line = null;
+		register_data_type("struct StdSet<T> a:T b:T", false);
+		register_data_type("struct ValueRange<T> a:T b:T", false);
     	while ((line = std_input.readLine()) != null) {
     		if (line.split(" ", 3)[1].contains("<")) {
     			register_data_type(line, false);
@@ -137,7 +429,7 @@ public class RenameLuaFn extends GhidraScript {
     		}
     	}
     	for (String value: lines) {
-    		register_data_type(value, false);
+    		//register_data_type(value, false);
     	}
     }
 
@@ -232,6 +524,10 @@ public class RenameLuaFn extends GhidraScript {
 			name = name.substring(1);
 			return new PointerDataType(parse_type(parent, name));
 		}
+		if (name.endsWith("*")) {
+			name = name.substring(0, name.length() - 1);
+			return new PointerDataType(parse_type(parent, name));
+		}
 		if (name.endsWith(">")) {
 			int index = name.indexOf("<");
 			List<String> generics = split_locally(name.substring(index + 1, name.length() - 1),',','<','>');
@@ -273,13 +569,20 @@ public class RenameLuaFn extends GhidraScript {
         return null;
     }
     StructureDataType create_struct(String name) {
+    	return create_struct_with(name, 0);
+    }
+    StructureDataType create_struct_with(String name, int n) {
         CategoryPath category = new CategoryPath("/custom");
-        return new StructureDataType(category, name, 0);
+        return new StructureDataType(category, name, n);
     }
 
     EnumDataType create_enum(String name) {
+    	return create_enum_with(name, 0);
+    }
+
+    EnumDataType create_enum_with(String name, int n) {
         CategoryPath category = new CategoryPath("/custom");
-        return new EnumDataType(category, name, 1);
+        return new EnumDataType(category, name, n);
     }
 
     UnionDataType create_union(String name) {
@@ -294,13 +597,13 @@ public class RenameLuaFn extends GhidraScript {
     void rename_functions() throws Exception {
     	String[] fn_names = {"get_entity", "kill_entity", "create_entity",
     			"to_stdstring", "init_world_state", "create_component_by_name",
-    			"insert_component", "init_entity_manager"};
+    			"insert_component", "init_entity_manager", "std_string_cmp"};
     	long[] fn_addrs = {0x0056eba0, 0x0044df60, 0x0056e590,
     			0x0041dd60, 0x00636a00, 0x0056c8e0,
-    			0x0056f720, 0x0056de10};
+    			0x0056f720, 0x0056de10, 0x00442220};
     	String[] returns = {"*Entity", null, "*Entity",
     			null, null, "*ComponentData",
-    			"*usize", "*EntityManager"};
+    			"*usize", "*EntityManager", "bool"};
     	String[][] params = {{"*EntityManager", "usize"},
     			{"*Entity"},
     			{"*EntityManager"},
@@ -308,7 +611,8 @@ public class RenameLuaFn extends GhidraScript {
     			null,
     			{"*StdString"},
     			{"*EntityManager","*ComponentData"},
-    			{"*EntityManager"}};
+    			{"*EntityManager"},
+    			{"*StdString", "char[]"}};
     	String[][] params_names = {{"this", "index"},
     			{"entity"},
     			{"this"},
@@ -316,7 +620,8 @@ public class RenameLuaFn extends GhidraScript {
     			null,
     			{"name"},
     			{"this","component_data"},
-    			{"entity_manager"}};
+    			{"entity_manager"},
+    			{"stdstring", "chars"}};
     	for (int i = 0; i < fn_addrs.length; i++) {
     		Address addr = space.getAddress(fn_addrs[i]);
     		Function fn = fpapi.getFunctionAt(addr);
