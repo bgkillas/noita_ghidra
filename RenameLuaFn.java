@@ -24,6 +24,7 @@ import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.ArrayDataType;
 import ghidra.program.model.data.CategoryPath;
 import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.DataTypeComponent;
 import ghidra.program.model.data.DataTypeConflictHandler;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.EnumDataType;
@@ -179,6 +180,11 @@ public class RenameLuaFn extends GhidraScript {
     			data = new ArrayDataType(data, field_size / data.getLength());
     		}
     		struct.replaceAtOffset(field_offset, data, field_size, field, desc);
+    	}
+    	for (DataTypeComponent com: struct.getComponents()) {
+    		if (com.getFieldName() == null) {
+    			struct.replaceAtOffset(com.getOffset(), parse("u8"), 1, "f"+Integer.toString(com.getOffset(), 16), "");
+    		}
     	}
     	dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
     	return s;
@@ -347,7 +353,7 @@ public class RenameLuaFn extends GhidraScript {
         res = res.substring(0, 1).toUpperCase() + res.substring(1);
     	n = res.indexOf("<");
     	if (n != -1) {
-    		res = res.substring(0, n) + res.substring(n, n + 1).toUpperCase() + res.substring(n+1);
+    		res = res.substring(0, n) + res.substring(n, n + 2).toUpperCase() + res.substring(n+2);
     	}
     	n = line.indexOf(" ");
     	res = res.replace("Uint16", "u16")
@@ -419,8 +425,6 @@ public class RenameLuaFn extends GhidraScript {
     	BufferedReader std_input = new BufferedReader(new InputStreamReader(proc.getInputStream()));
     	List<String> lines = new ArrayList<>();
     	String line = null;
-		register_data_type("struct StdSet<T> a:T b:T", false);
-		register_data_type("struct ValueRange<T> a:T b:T", false);
     	while ((line = std_input.readLine()) != null) {
     		if (line.split(" ", 3)[1].contains("<")) {
     			register_data_type(line, false);
