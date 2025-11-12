@@ -13,9 +13,6 @@ import java.util.Scanner;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import org.apache.commons.lang3.arch.Processor.Type;
-
 import ghidra.app.cmd.function.ApplyFunctionSignatureCmd;
 import ghidra.app.decompiler.flatapi.FlatDecompilerAPI;
 import ghidra.app.script.GhidraScript;
@@ -43,6 +40,7 @@ import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.listing.FunctionSignature;
+import ghidra.program.model.listing.GhidraClass;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
@@ -88,17 +86,30 @@ public class RenameLuaFn extends GhidraScript {
     		type_map.put("u"+i, "uint"+i);
        		type_map.put("i"+i, "int"+i);
     	}
-        parse_rust();
-    	parse_component_doc();
+        //parse_rust();
+    	//parse_component_doc();
     	parse_vtables();
-    	run_fails();
-    	rename_lua_fn();
-    	rename_globals();
-    	rename_functions();
+    	//run_fails();
+    	//rename_lua_fn();
+    	//rename_globals();
+    	//rename_functions();
     }
     
     void parse_vtables() throws Exception {
-    	
+    	Iterator<GhidraClass> iter = table.getClassNamespaces();
+    	while (iter.hasNext()) {
+    		Symbol sym = iter.next().getSymbol();
+    		for (Symbol s:table.getChildren(sym)) {
+    			if (s.getName().equals("vftable")) {
+					println(s.getAddress().toString());
+    				Data dat = fpapi.getDataAt(s.getAddress());
+    				int[] addrs = (int[]) dat.getValue();
+    				for (int addr: addrs) {
+    					println(String.valueOf(addr));
+    				}
+    			}
+    		}
+    	}
     }
 
     void parse_component_doc() throws Exception {
@@ -468,7 +479,7 @@ public class RenameLuaFn extends GhidraScript {
     			.replace("String", "Stdstring")
     			.replace("Str", "Stdstring")
     			.replace("Stdstring", "StdString")
-    			.replace("IklimbState", "IKLimbState")
+    			.replace("Iklimb", "IKLimb")
     			.replace("ValueRangeisize", "Valuerange<isize>")
     			.replace("ValueRange", "Valuerange<f32>")
     			.replace("Valuerange", "ValueRange")
@@ -682,7 +693,7 @@ public class RenameLuaFn extends GhidraScript {
     }
 
     EnumDataType create_enum(String name) {
-    	return create_enum_with(name, 0);
+    	return create_enum_with(name, 1);
     }
 
     EnumDataType create_enum_with(String name, int n) {
