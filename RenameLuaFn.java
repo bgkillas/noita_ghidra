@@ -91,30 +91,38 @@ public class RenameLuaFn extends GhidraScript {
     	}
         //parse_rust();
     	//parse_component_doc();
-    	parse_vtables();
     	//run_fails();
     	//rename_lua_fn();
     	//rename_globals();
     	//rename_functions();
+    	parse_vtables();
+    }
+    
+    boolean vtable_filter(String name) {
+    	return name.endsWith("Component");
     }
     
     void parse_vtables() throws Exception {
     	Iterator<GhidraClass> iter = table.getClassNamespaces();
-    	String rust = "pub trait VFTable: Debug {\n"
+    	String rust = "use std::fmt::Debug;\n"
+    					+ "pub trait VFTable: Debug {\n"
     					+ "    const VFTABLE_PTR: *const Self;\n"
     					+ "    const VFTABLE: Self;\n"
     					+"}\n";
     	while (iter.hasNext()) {
     		Symbol sym = iter.next().getSymbol();
+    		if (!vtable_filter(sym.getName())) {
+    			continue;
+    		}
     		int k = 0;
     		for (Symbol s:table.getChildren(sym)) {
     			if (s.getName().equals("vftable")) {
     				Data dat = fpapi.getDataAt(s.getAddress());
     				byte[] bytes = dat.getBytes();
-    				String def = "impl VFTable for " + sym.getName() + "Vftable";
+    				String def = "impl VFTable for " + sym.getName() + "VFTable";
     				rust += "#[derive(Debug)]\n"
     						+ "#[repr(C)]\n"
-    						+ "pub struct " + sym.getName() + "Vftable";
+    						+ "pub struct " + sym.getName() + "VFTable";
     				if (k != 0) {
     					rust += k;
     					def += k;
@@ -123,11 +131,25 @@ public class RenameLuaFn extends GhidraScript {
     				def += " {\n"
     						+ "    const VFTABLE_PTR: *const Self = 0x" + s.getAddress().toString() + " as *const Self;\n";
     				def += "    const VFTABLE: Self = Self {\n";
+    				Map<String,Integer> map = new HashMap<>();
     				for (int i = 0; i + 3 < bytes.length; i += 4) {
     					byte[] num = {bytes[i+3], bytes[i+2], bytes[i+1], bytes[i]};
     					Address addr = addressFactory.getAddress(Integer.toString(ByteBuffer.wrap(num).getInt(), 16));
-        				rust += "    pub f" + i / 4 + ": " + "*const usize,\n";
-        				def += "        f" + i / 4 + ": 0x" + addr.toString() + " as *const usize,\n";
+    					String name = "f" + i / 4;
+    					Function fn = fpapi.getFunctionAt(addr);
+    					if (!fn.getName().startsWith("FUN_")) {
+    						name = fn.getName();
+    					}
+    					if (map.get(name) != null) {
+    						int n = map.get(name);
+    						n += 1;
+    						map.put(name, n);
+    						name += n;
+    					} else {
+    						map.put(name, 0);
+    					}
+        				rust += "    pub " + name + ": " + "*const usize,\n";
+        				def += "        " + name + ": 0x" + addr.toString() + " as *const usize,\n";
     				}
     				rust += "}\n";
     				def += "    };\n}\n";
@@ -289,8 +311,7 @@ public class RenameLuaFn extends GhidraScript {
     			+ "            ..Default::default()\n"
     			+ "        }\n"
     			+ "    }\n"
-    			+ "    const VTABLE: &'static ComponentVTable =\n"
-    			+ "        unsafe { (0x"+vftable+" as *const ComponentVTable).as_ref().unwrap() };\n"
+    			+ "    const VTABLE: *const ComponentVTable = "+name+"VFTable::VFTABLE_PTR.cast()\n"
     			+ "    const NAME: &'static str = \""+name+"\";\n"
     			+ "    const C_NAME: CString = CString::from_str(\""+name+"\\0\");\n"
     			+ "}\n";
