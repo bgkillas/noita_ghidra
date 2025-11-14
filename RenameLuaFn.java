@@ -89,12 +89,12 @@ public class RenameLuaFn extends GhidraScript {
     		type_map.put("u"+i, "uint"+i);
        		type_map.put("i"+i, "int"+i);
     	}
-        //parse_rust();
-    	//parse_component_doc();
-    	//run_fails();
-    	//rename_lua_fn();
-    	//rename_globals();
-    	//rename_functions();
+        parse_rust();
+    	parse_component_doc();
+    	run_fails();
+    	rename_lua_fn();
+    	rename_globals();
+    	rename_functions();
     	parse_vtables();
     }
     
@@ -162,7 +162,6 @@ public class RenameLuaFn extends GhidraScript {
     }
 
     void parse_component_doc() throws Exception {
-    	String folder = sourceFile.getParentFile().getAbsolutePath();
     	File file = new File(folder + "/component_documentation.txt");
     	Scanner reader = new Scanner(file);
     	List<String> components = new ArrayList<>();
@@ -194,10 +193,9 @@ public class RenameLuaFn extends GhidraScript {
     String parse_component(String component) throws Exception {
     	String[] lines = component.split("\n");
     	String name = lines[0];
-    	Triple<StructureDataType, List<Triple<String, Integer, Integer>>, Address> tuple = get_struct(name);
+    	Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> tuple = get_struct(name);
     	StructureDataType struct = tuple.a;
     	List<Triple<String, Integer, Integer>> list = tuple.b;
-    	Address vftable = tuple.c;
 		struct.replaceAtOffset(0, parse("ComponentData"), 72, "base", "");
     	for (int i = 1; i < lines.length;i++) {
     		String line = normalize(lines[i]);
@@ -226,7 +224,9 @@ public class RenameLuaFn extends GhidraScript {
     			}
     		}
     		int j = 0;
+    		println(name);
     		for (Triple<String, Integer, Integer> tup: list) {
+        		println(tup.a);
     			if (tup.a.equals(field)) {
     				break;
     			}
@@ -238,6 +238,8 @@ public class RenameLuaFn extends GhidraScript {
     		} else if (field.equals("loop")) {
     			field = "loops";
     		}
+    		println(name);
+    		println(field);
     		Triple<String, Integer, Integer> tup = list.get(j);
     		int field_size = tup.b;
     		int field_offset = tup.c;
@@ -346,7 +348,7 @@ public class RenameLuaFn extends GhidraScript {
 		return t;
     }
 
-    Triple<StructureDataType, List<Triple<String, Integer, Integer>>,Address> get_struct(String name) throws Exception {
+    Tuple<StructureDataType, List<Triple<String, Integer, Integer>>> get_struct(String name) throws Exception {
 		Address vftable = null;
 		Symbol sym = table.getClassSymbol(name, null);
 		for (Symbol s:table.getChildren(sym)) {
@@ -387,7 +389,7 @@ public class RenameLuaFn extends GhidraScript {
 		for (String line: lines) {
 			if (line.contains("}")) {
 				if (!line.startsWith(" ")) {
-					return new Triple<>(struct, list, vftable);
+					return new Tuple<>(struct, list);
 				}
 				list.add(new Triple<>(field_name, field_size, field_offset));
 			}
@@ -423,7 +425,7 @@ public class RenameLuaFn extends GhidraScript {
 				field_offset = parse_hex(line.substring(0, line.length() - 1));
 			}
 		}
-		return new Triple<>(struct, list, vftable);
+		return new Tuple<>(struct, list);
     }
     class Tuple<T,K> {
     	T a;
@@ -578,7 +580,6 @@ public class RenameLuaFn extends GhidraScript {
     }
 
     void parse_file(String file) throws Exception {
-    	String folder = sourceFile.getParentFile().getAbsolutePath();
     	Runtime rt = Runtime.getRuntime();
     	String[] commands = {folder + "/target/release/parse", folder + file};
     	Process proc = rt.exec(commands);
@@ -593,7 +594,7 @@ public class RenameLuaFn extends GhidraScript {
     		}
     	}
     	for (String value: lines) {
-    		//register_data_type(value, false);
+    		register_data_type(value, false);
     	}
     }
 
