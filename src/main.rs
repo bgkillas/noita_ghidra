@@ -99,7 +99,7 @@ fn parse_type(ty: &Type) -> String {
                 String::new()
             }
         }
-        _ => todo!(),
+        _ => String::new(),
     }
 }
 fn parse_len(ex: &Expr) -> String {
@@ -145,7 +145,7 @@ fn parse_from_file(path: &str) -> Vec<String> {
         .items
         .into_iter()
         .filter_map(|item| match item {
-            Item::Struct(s) => Some(parse_struct(s)),
+            Item::Struct(s) if s.ident != "Msvcr" => Some(parse_struct(s)),
             Item::Union(u) => Some(parse_union(u)),
             Item::Enum(e) => Some(parse_enum(e)),
             _ => None,

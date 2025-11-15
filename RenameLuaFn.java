@@ -376,12 +376,13 @@ public class RenameLuaFn extends GhidraScript {
 			int start = line.indexOf(",");
 			if (start != -1) {
 				line = line.substring(start + 1);
-				start = line.indexOf(")");
+				start = line.lastIndexOf(")");
 				line = line.substring(0, start);
-				if (line.startsWith("\"")) {
-					field_name = line.substring(1, line.length() - 1);
+				start = line.indexOf("\"");
+				if (start != -1) {
+					field_name = line.substring(start + 1, line.length() - 1);
 				} else {
-					Address addr = addressFactory.getAddress(line.substring(6));
+					Address addr = addressFactory.getAddress(line.substring(line.length() - 8));
 					if (addr == null) {
 						continue;
 					}
@@ -515,6 +516,7 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	void parse_rust() throws Exception {
+		parse_file("/noita_entangled_worlds/noita_api/src/heap.rs");
 		parse_file("/noita_entangled_worlds/noita_api/src/noita/types.rs");
 		parse_file("/noita_entangled_worlds/noita_api/src/noita/types/");
 	}
