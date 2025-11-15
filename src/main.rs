@@ -3,8 +3,8 @@ use std::env::args;
 use std::fs;
 use syn::{
     AngleBracketedGenericArguments, Expr, Fields, GenericArgument, GenericParam, Generics, Item,
-    ItemEnum, ItemStruct, ItemUnion, Lit, PathArguments, Type, TypeArray, TypePath, TypePtr,
-    TypeReference, TypeSlice, TypeTuple, UnOp,
+    ItemEnum, ItemStruct, ItemUnion, Lit, PathArguments, Type, TypeArray, TypeBareFn, TypePath,
+    TypePtr, TypeReference, TypeSlice, TypeTuple, UnOp,
 };
 fn main() {
     for arg in args().skip(1) {
@@ -99,7 +99,8 @@ fn parse_type(ty: &Type) -> String {
                 String::new()
             }
         }
-        _ => String::new(),
+        Type::BareFn(TypeBareFn { .. }) => "*uint".to_string(),
+        _ => todo!(),
     }
 }
 fn parse_len(ex: &Expr) -> String {
@@ -145,7 +146,7 @@ fn parse_from_file(path: &str) -> Vec<String> {
         .items
         .into_iter()
         .filter_map(|item| match item {
-            Item::Struct(s) if s.ident != "Msvcr" => Some(parse_struct(s)),
+            Item::Struct(s) => Some(parse_struct(s)),
             Item::Union(u) => Some(parse_union(u)),
             Item::Enum(e) => Some(parse_enum(e)),
             _ => None,
