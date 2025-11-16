@@ -64,6 +64,7 @@ public class RenameLuaFn extends GhidraScript {
 	Map<String, java.util.function.Function<List<String>, DataType>> generic_map = new HashMap<>();
 	DataTypeManagerService svc;
 	List<String> failed = new ArrayList<>();
+	List<String> structs = new ArrayList<>();
 	Listing listing;
 	SymbolTable table;
 	String folder;
@@ -99,7 +100,7 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	boolean vtable_filter(String name) {
-		return name.endsWith("Component");
+		return name.endsWith("Component") || structs.contains(name);
 	}
 
 	void parse_vtables() throws Exception {
@@ -671,6 +672,7 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	DataType get_type(String name) {
+		structs.add(name);
 		for (DataTypeManager datatypemanager : svc.getDataTypeManagers()) {
 			DataType type = find_type_in_manager(datatypemanager, name);
 			if (type != null) {
