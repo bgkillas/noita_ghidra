@@ -750,7 +750,8 @@ public class RenameLuaFn extends GhidraScript {
         rename("get_entity", 0x0056eba0, "*Entity", new String[][] {{"entity_manager_ptr", "*EntityManager"}, {"index", "usize"}});
         rename("kill_entity", 0x0044df60, null, new String[][]{{"entity", "*Entity"}});
         rename("create_entity", 0x0056e590, "*Entity", new String[][]{{"entity_manager_ptr", "*EntityManager"}});
-        rename("to_stdstring", 0x0041dd60, null, new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}, {"size", "usize"}});
+        rename("to_stdstring_sized", 0x0041dd60, null, new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}, {"size", "usize"}});
+        rename("to_stdstring", 0x0041cc80, null, new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}});
         rename("create_component_by_name", 0x0056c8e0, "*ComponentData", new String[][]{{"name", "*StdString"}});
         rename("insert_component", 0x0056f720, "*usize", new String[][] {{"entity_manager_ptr", "*EntityManager"},{"component_data", "*ComponentData"}});
         rename("init_entity_manager", 0x0056de10, "*EntityManager", new String[][]{{"entity_manager_ptr", "*EntityManager"}});
