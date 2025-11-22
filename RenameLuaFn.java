@@ -43,6 +43,7 @@ import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.listing.FunctionSignature;
 import ghidra.program.model.listing.GhidraClass;
 import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Variable;
@@ -90,17 +91,89 @@ public class RenameLuaFn extends GhidraScript {
 			type_map.put("u" + i, "uint" + i);
 			type_map.put("i" + i, "int" + i);
 		}
-		parse_rust();
-		parse_component_doc();
-		run_fails();
-		rename_lua_fn();
-		rename_globals();
-		rename_functions();
-		parse_vtables();
+		// parse_rust();
+		// parse_component_doc();
+		// run_fails();
+		// rename_lua_fn();
+		// rename_globals();
+		// rename_functions();
+		// parse_vtables();
+		parse_vtables_with_size();
 	}
 
 	boolean vtable_filter(String name) {
 		return name.endsWith("Component") || structs.contains(name);
+	}
+
+	void parse_vtables_with_size() throws Exception {
+		Iterator<GhidraClass> iter = table.getClassNamespaces();
+		String rust = "";
+		while (iter.hasNext()) {
+			Symbol sym = iter.next().getSymbol();
+			if (!vtable_filter(sym.getName())) {
+				continue;
+			}
+			int k = 0;
+			for (Symbol s : table.getChildren(sym)) {
+				if (s.getName().matches("^vftable[0-9]*$")) {
+					if (k != 0) {
+						s.setName("vftable" + k, source);
+					}
+					boolean found = false;
+					outer: for (Reference ref : fpapi.getReferencesTo(s.getAddress())) {
+						Function fun = fpapi.getFunctionContaining(ref.getFromAddress());
+						if (fun == null) {
+							continue;
+						}
+						String decomp = fdapi.decompile(fun, 60);
+						if (decomp == null || decomp.isEmpty()) {
+							continue;
+						}
+						int index = decomp.indexOf(sym.getName() + "::" + s.getName() + ";");
+						if (index == -1) {
+							continue;
+						}
+						decomp = decomp.substring(0, index);
+						decomp = decomp.substring(0, decomp.lastIndexOf('=') - 1);
+						index = Integer.max(Integer.max(decomp.lastIndexOf('*'), decomp.lastIndexOf(' ')),
+								decomp.lastIndexOf(')'));
+						String var = decomp.substring(index + 1);
+						var = var.split("-")[0].split("\\[")[0];
+						int i = 0;
+						for (Parameter param : fun.getParameters()) {
+							if (param.getName().equals(var)) {
+								// TODO
+								found = true;
+								break outer;
+							}
+							i += 1;
+						}
+						for (String line : decomp.split("\n")) {
+							if (!line.contains(" " + var + " = ")) {
+								continue;
+							}
+							String r = "operator_new(";
+							index = line.indexOf(r);
+							if (index != -1) {
+								line = line.substring(index + r.length());
+								index = line.indexOf(")");
+								line = line.substring(0, index);
+								int size = parse_hex(line);
+								rust += sym.getName() + " " + s.getName() + " " + size + "\n";
+								found = true;
+								break;
+							}
+						}
+					}
+					if (!found) {
+						println(sym.getName());
+						println(s.getName());
+					}
+					k += 1;
+				}
+			}
+		}
+		Files.writeString(Path.of(folder + "/vftables.txt"), rust);
 	}
 
 	void parse_vtables() throws Exception {
@@ -747,16 +820,22 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	void rename_functions() throws Exception {
-        rename("get_entity", 0x0056eba0, "*Entity", new String[][] {{"entity_manager_ptr", "*EntityManager"}, {"index", "usize"}});
-        rename("kill_entity", 0x0044df60, null, new String[][]{{"entity", "*Entity"}});
-        rename("create_entity", 0x0056e590, "*Entity", new String[][]{{"entity_manager_ptr", "*EntityManager"}});
-        rename("to_stdstring_sized", 0x0041dd60, null, new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}, {"size", "usize"}});
-        rename("to_stdstring", 0x0041cc80, null, new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}});
-        rename("create_component_by_name", 0x0056c8e0, "*ComponentData", new String[][]{{"name", "*StdString"}});
-        rename("insert_component", 0x0056f720, "*usize", new String[][] {{"entity_manager_ptr", "*EntityManager"},{"component_data", "*ComponentData"}});
-        rename("init_entity_manager", 0x0056de10, "*EntityManager", new String[][]{{"entity_manager_ptr", "*EntityManager"}});
-        rename("std_string_cmp", 0x00442220, "bool", new String[][]{{"stdstring_ptr", "*StdString"}, {"string", "char[]"}});
-        rename("init_world_state", 0x00636a00, null, null);
+		rename("get_entity", 0x0056eba0, "*Entity",
+				new String[][] { { "entity_manager_ptr", "*EntityManager" }, { "index", "usize" } });
+		rename("kill_entity", 0x0044df60, null, new String[][] { { "entity", "*Entity" } });
+		rename("create_entity", 0x0056e590, "*Entity", new String[][] { { "entity_manager_ptr", "*EntityManager" } });
+		rename("to_stdstring_sized", 0x0041dd60, null,
+				new String[][] { { "stdstring_ptr", "*StdString" }, { "string", "char[]" }, { "size", "usize" } });
+		rename("to_stdstring", 0x0041cc80, null,
+				new String[][] { { "stdstring_ptr", "*StdString" }, { "string", "char[]" } });
+		rename("create_component_by_name", 0x0056c8e0, "*ComponentData", new String[][] { { "name", "*StdString" } });
+		rename("insert_component", 0x0056f720, "*usize",
+				new String[][] { { "entity_manager_ptr", "*EntityManager" }, { "component_data", "*ComponentData" } });
+		rename("init_entity_manager", 0x0056de10, "*EntityManager",
+				new String[][] { { "entity_manager_ptr", "*EntityManager" } });
+		rename("std_string_cmp", 0x00442220, "bool",
+				new String[][] { { "stdstring_ptr", "*StdString" }, { "string", "char[]" } });
+		rename("init_world_state", 0x00636a00, null, null);
 	}
 
 	void rename_globals() throws Exception {

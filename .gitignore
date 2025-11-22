@@ -7,3 +7,4 @@ target/
 /.classpath
 /components.rs
 /vftables.rs
+/vftables.txt
