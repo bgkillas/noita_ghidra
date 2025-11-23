@@ -117,7 +117,6 @@ public class RenameLuaFn extends GhidraScript {
 						s.setName("vftable" + k, source);
 					}
 					boolean found = false;
-					println(sym.getName() + " " + s.getName());
 					Reference[] refs = fpapi.getReferencesTo(s.getAddress());
 					if (refs.length <= 32 && !sym.getName().startsWith("_")) {
 						for (Reference ref : refs) {
@@ -164,7 +163,6 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	Integer process_inner(String var, String decomp) throws Exception {
-		println("inner");
 		for (String line : decomp.split("\n")) {
 			if (!line.contains(" " + var + " = ")) {
 				continue;
@@ -183,7 +181,6 @@ public class RenameLuaFn extends GhidraScript {
 	}
 
 	Integer process_function(Function fun, String var) throws Exception {
-		println(fun.getEntryPoint().toString());
 		int i = 0;
 		Reference[] refs = null;
 		for (Parameter param : fun.getParameters()) {
@@ -197,30 +194,33 @@ public class RenameLuaFn extends GhidraScript {
 						continue;
 					}
 					String decomp = fdapi.decompile(fn);
-					String[] split = decomp.split(fun.getName());
-					decomp = split[0];
-					if (split.length == 1) {
-						break;
+					String[] split_decomp = decomp.split(fun.getName());
+					if (split_decomp.length == 1) {
+						continue;
 					}
-					split = split[1].substring(1, split[1].indexOf('\n') - 2).split(",");
-					if (i >= split.length) {
-						break;
-					}
-					String arg = split[i];
-					int index = arg.lastIndexOf(')');
-					if (index != -1) {
-						arg = arg.substring(index + 1);
-					}
-					if (arg.contains("->") || arg.contains("+") || arg.contains("[") || arg.isBlank()) {
-						break;
-					}
-					Integer upper = process_function(fn, arg);
-					if (upper != null) {
-						return upper;
-					}
-					Integer inner = process_inner(arg, decomp);
-					if (inner != null) {
-						return inner;
+					for (int j = 0; j + 1 < split_decomp.length; j++) {
+						String[] split = split_decomp[j + 1].substring(1, split_decomp[j + 1].indexOf('\n') - 2)
+								.split(",");
+						if (i >= split.length) {
+							continue;
+						}
+						String arg = split[i];
+						int index = arg.lastIndexOf(')');
+						if (index != -1) {
+							arg = arg.substring(index + 1);
+						}
+						if (arg.contains("->") || arg.contains("+") || arg.contains("[") || arg.isBlank()
+								|| arg.equals("0x0")) {
+							continue;
+						}
+						Integer upper = process_function(fn, arg);
+						if (upper != null) {
+							return upper;
+						}
+						Integer inner = process_inner(arg, split_decomp[j]);
+						if (inner != null) {
+							return inner;
+						}
 					}
 				}
 				break;
