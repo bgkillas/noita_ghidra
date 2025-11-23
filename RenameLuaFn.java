@@ -91,14 +91,14 @@ public class RenameLuaFn extends GhidraScript {
 			type_map.put("u" + i, "uint" + i);
 			type_map.put("i" + i, "int" + i);
 		}
-		// parse_rust();
-		// parse_component_doc();
-		// run_fails();
-		// rename_lua_fn();
-		// rename_globals();
-		// rename_functions();
-		// parse_vtables();
-		parse_vtables_with_size();
+		parse_rust();
+		parse_component_doc();
+		run_fails();
+		rename_lua_fn();
+		rename_globals();
+		rename_functions();
+		parse_vtables();
+		// parse_vtables_with_size();
 	}
 
 	boolean vtable_filter(String name) {
@@ -110,9 +110,6 @@ public class RenameLuaFn extends GhidraScript {
 		String rust = "";
 		while (iter.hasNext()) {
 			Symbol sym = iter.next().getSymbol();
-			if (!vtable_filter(sym.getName())) {
-				continue;
-			}
 			int k = 0;
 			for (Symbol s : table.getChildren(sym)) {
 				if (s.getName().matches("^vftable[0-9]*$")) {
@@ -120,60 +117,117 @@ public class RenameLuaFn extends GhidraScript {
 						s.setName("vftable" + k, source);
 					}
 					boolean found = false;
-					outer: for (Reference ref : fpapi.getReferencesTo(s.getAddress())) {
-						Function fun = fpapi.getFunctionContaining(ref.getFromAddress());
-						if (fun == null) {
-							continue;
-						}
-						String decomp = fdapi.decompile(fun, 60);
-						if (decomp == null || decomp.isEmpty()) {
-							continue;
-						}
-						int index = decomp.indexOf(sym.getName() + "::" + s.getName() + ";");
-						if (index == -1) {
-							continue;
-						}
-						decomp = decomp.substring(0, index);
-						decomp = decomp.substring(0, decomp.lastIndexOf('=') - 1);
-						index = Integer.max(Integer.max(decomp.lastIndexOf('*'), decomp.lastIndexOf(' ')),
-								decomp.lastIndexOf(')'));
-						String var = decomp.substring(index + 1);
-						var = var.split("-")[0].split("\\[")[0];
-						int i = 0;
-						for (Parameter param : fun.getParameters()) {
-							if (param.getName().equals(var)) {
-								// TODO
-								found = true;
-								break outer;
-							}
-							i += 1;
-						}
-						for (String line : decomp.split("\n")) {
-							if (!line.contains(" " + var + " = ")) {
+					println(sym.getName() + " " + s.getName());
+					Reference[] refs = fpapi.getReferencesTo(s.getAddress());
+					if (refs.length <= 32 && !sym.getName().startsWith("_")) {
+						for (Reference ref : refs) {
+							Function fun = fpapi.getFunctionContaining(ref.getFromAddress());
+							if (fun == null) {
 								continue;
 							}
-							String r = "operator_new(";
-							index = line.indexOf(r);
-							if (index != -1) {
-								line = line.substring(index + r.length());
-								index = line.indexOf(")");
-								line = line.substring(0, index);
-								int size = parse_hex(line);
-								rust += sym.getName() + " " + s.getName() + " " + size + "\n";
+							String decomp = fdapi.decompile(fun);
+							if (decomp == null || decomp.isEmpty()) {
+								continue;
+							}
+							int index = decomp.indexOf(sym.getName() + "::" + s.getName() + ";");
+							if (index == -1) {
+								continue;
+							}
+							decomp = decomp.substring(0, index);
+							decomp = decomp.substring(0, decomp.lastIndexOf('=') - 1);
+							index = Integer.max(Integer.max(decomp.lastIndexOf('*'), decomp.lastIndexOf(' ')),
+									decomp.lastIndexOf(')'));
+							String var = decomp.substring(index + 1);
+							var = var.split("->")[0].split("\\[")[0];
+							Integer upper = process_function(fun, var);
+							if (upper != null) {
+								rust += sym.getName() + " " + s.getAddress() + " " + upper + "\n";
+								found = true;
+								break;
+							}
+							Integer inner = process_inner(var, decomp);
+							if (inner != null) {
+								rust += sym.getName() + " " + s.getAddress() + " " + inner + "\n";
 								found = true;
 								break;
 							}
 						}
 					}
 					if (!found) {
-						println(sym.getName());
-						println(s.getName());
+						rust += sym.getName() + " " + s.getAddress() + " null\n";
 					}
 					k += 1;
 				}
 			}
 		}
 		Files.writeString(Path.of(folder + "/vftables.txt"), rust);
+	}
+
+	Integer process_inner(String var, String decomp) throws Exception {
+		println("inner");
+		for (String line : decomp.split("\n")) {
+			if (!line.contains(" " + var + " = ")) {
+				continue;
+			}
+			String r = "operator_new(";
+			int index = line.indexOf(r);
+			if (index != -1) {
+				line = line.substring(index + r.length());
+				index = line.indexOf(")");
+				line = line.substring(0, index);
+				int size = parse_hex(line);
+				return size;
+			}
+		}
+		return null;
+	}
+
+	Integer process_function(Function fun, String var) throws Exception {
+		println(fun.getEntryPoint().toString());
+		int i = 0;
+		Reference[] refs = null;
+		for (Parameter param : fun.getParameters()) {
+			if (param.getName().equals(var)) {
+				if (refs == null) {
+					refs = fpapi.getReferencesTo(fun.getEntryPoint());
+				}
+				for (Reference ref : refs) {
+					Function fn = fpapi.getFunctionContaining(ref.getFromAddress());
+					if (fn == null) {
+						continue;
+					}
+					String decomp = fdapi.decompile(fn);
+					String[] split = decomp.split(fun.getName());
+					decomp = split[0];
+					if (split.length == 1) {
+						break;
+					}
+					split = split[1].substring(1, split[1].indexOf('\n') - 2).split(",");
+					if (i >= split.length) {
+						break;
+					}
+					String arg = split[i];
+					int index = arg.lastIndexOf(')');
+					if (index != -1) {
+						arg = arg.substring(index + 1);
+					}
+					if (arg.contains("->") || arg.contains("+") || arg.contains("[") || arg.isBlank()) {
+						break;
+					}
+					Integer upper = process_function(fn, arg);
+					if (upper != null) {
+						return upper;
+					}
+					Integer inner = process_inner(arg, decomp);
+					if (inner != null) {
+						return inner;
+					}
+				}
+				break;
+			}
+			i += 1;
+		}
+		return null;
 	}
 
 	void parse_vtables() throws Exception {
